@@ -1,0 +1,226 @@
+# ============================================
+# 🎬 Smart Video Clipper - Git忽略文件
+# ============================================
+
+# ========================
+# Python 相关
+# ========================
+
+# 虚拟环境
+venv/
+.venv/
+env/
+.env/
+ENV/
+
+# Python缓存
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Cython调试符号
+cython_debug/
+
+# ========================
+# IDE 和编辑器
+# ========================
+
+# VS Code
+.vscode/
+*.code-workspace
+
+# PyCharm / JetBrains
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# Vim
+*.swp
+*.swo
+*~
+
+# Emacs
+*~
+\#*\#
+/.emacs.desktop
+/.emacs.desktop.lock
+*.elc
+
+# ========================
+# 操作系统文件
+# ========================
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+# Linux
+*~
+.directory
+
+# ========================
+# 项目特定忽略
+# ========================
+
+# 环境配置（包含敏感信息）
+.env
+!.env.example
+
+# 输出目录（生成的视频文件）
+output/
+outputs/
+export/
+
+# 临时文件目录
+temp/
+tmp/
+cache/
+.cache/
+
+# 输入视频（用户自己的视频文件）
+input/
+inputs/
+videos/
+
+# 日志文件
+logs/
+*.log
+
+# AI模型缓存（太大了）
+models/
+*.pt
+*.pth
+*.bin
+*.onnx
+*.safetensors
+
+# Whisper模型缓存
+~/.cache/whisper/
+
+# Hugging Face缓存
+~/.cache/huggingface/
+
+# CLIP模型缓存
+~/.cache/clip/
+
+# ========================
+# 视频和音频文件
+# ========================
+
+# 视频文件（避免误提交大文件）
+*.mp4
+*.avi
+*.mkv
+*.mov
+*.wmv
+*.flv
+*.webm
+*.m4v
+*.mpeg
+*.mpg
+*.3gp
+
+# 音频文件
+*.mp3
+*.wav
+*.aac
+*.flac
+*.ogg
+*.m4a
+*.wma
+
+# 图片文件（封面等生成文件）
+# 注意：如果有需要提交的图片，请手动添加
+# *.jpg
+# *.jpeg
+# *.png
+# *.gif
+# *.bmp
+
+# ========================
+# 其他
+# ========================
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+*.ipynb
+
+# 测试覆盖率
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# 安装包
+*.tar.gz
+*.zip
+*.rar
+*.7z
+
+# 数据库
+*.db
+*.sqlite
+*.sqlite3
+
+# 备份文件
+*.bak
+*.backup
+*.old
+
+# 临时Python文件
+pip-log.txt
+pip-delete-this-directory.txt
+
+# 环境变量
+.env.local
+.env.*.local
+

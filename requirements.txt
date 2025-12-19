@@ -1,0 +1,59 @@
+# ============================================
+# SmartVideoClipper - 依赖清单
+# 🇨🇳 国内版（所有包国内可直接安装）
+# Python 3.10+ 推荐
+# ============================================
+
+# 💡 安装前请先配置国内镜像源：
+# pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
+
+# ===== 视频处理 =====
+moviepy>=1.0.3
+opencv-python>=4.9.0
+ffmpeg-python>=0.2.0
+scenedetect[opencv]>=0.6.0
+auto-editor>=24.0.0
+
+# ===== 语音识别 =====
+faster-whisper>=1.0.0
+torch>=2.1.0
+torchaudio>=2.1.0
+# 💡 模型下载需配置HF镜像: 
+# Windows: set HF_ENDPOINT=https://hf-mirror.com
+# Linux/Mac: export HF_ENDPOINT=https://hf-mirror.com
+
+# ===== AI分析 =====
+# 🇨🇳 Chinese-CLIP（需要从github安装）
+# pip install cn-clip  (或 pip install git+https://github.com/OFA-Sys/Chinese-CLIP.git)
+cn-clip
+# Ollama Python客户端（用于调用本地Ollama服务）
+ollama>=0.2.0
+# Ollama应用（阿里出品，国内友好）
+# ⚠️ Ollama应用需要单独下载安装
+# 下载地址: https://ollama.ai/download
+# 安装后运行: ollama pull qwen2.5:7b
+
+# ===== TTS语音合成 =====
+# 🇨🇳 ChatTTS（国产开源，效果很好）
+# ⚠️ ChatTTS安装方式:
+# pip install git+https://github.com/2noise/ChatTTS.git
+# 或者: pip install chattts-fork  (第三方简化版)
+pydub>=0.25.0
+edge-tts>=6.1.0  # Edge-TTS作为备选方案，更稳定
+
+# ===== Web界面 =====
+gradio>=4.0.0
+
+# ===== 工具库 =====
+python-dotenv>=1.0.0
+tqdm>=4.66.0
+pillow>=10.0.0
+numpy>=1.24.0
+httpx>=0.26.0
+aiofiles>=23.0.0
+beautifulsoup4>=4.12.0  # 豆瓣爬取用
+lxml>=4.9.0  # BeautifulSoup解析器
+
+# ===== 🇨🇳 联网搜索（国内版使用豆瓣）=====
+# 无需额外安装，使用httpx+beautifulsoup4爬取豆瓣
+
