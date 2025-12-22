@@ -39,11 +39,12 @@ from transcribe import transcribe_video
 from analyze_frames import CLIPAnalyzer
 from generate_script import generate_narration_script_enhanced
 from auto_detect_highlights import auto_detect_keep_original
-from smart_cut import extract_clips, concat_clips, select_best_clips
+from smart_cut import extract_clips, concat_clips
 from tts_synthesis import TTSEngine
 from compose_video import compose_final_video, convert_to_douyin
 from movie_info import MovieInfoFetcher
-from intro_outro_detect import auto_trim_intro_outro  # 新增：片头片尾检测
+from intro_outro_detect import auto_trim_intro_outro
+from smart_importance import calculate_importance_scores, select_important_clips  # 智能重要性评分
 
 
 # 处理步骤定义（新增Step 0）
@@ -176,20 +177,36 @@ async def full_auto_process(
         segments, transcript = [], ""
     GPUManager.clear()
     
-    # ========== Step 3: CLIP画面分析 ==========
-    report_progress(3, "正在分析画面内容...")
+    # ========== Step 3: 智能重要性分析 ==========
+    report_progress(3, "正在分析画面和音频内容...")
+    
+    # 3.1 CLIP画面分析
     try:
         analyzer = CLIPAnalyzer()
         analyzed_scenes = analyzer.analyze_video_scenes(processed_video, scenes)
         del analyzer
     except Exception as e:
         print(f"   [WARNING] CLIP分析失败: {e}")
-        analyzed_scenes = []
+        analyzed_scenes = [{'start': s['start'], 'end': s['end'], 'scene_type': '未知'} for s in scenes]
     
-    if not analyzed_scenes or len(analyzed_scenes) == 0:
-        print("   [WARNING] 画面分析无结果，使用原始镜头列表")
-        analyzed_scenes = [{'start': s['start'], 'end': s['end'], 'is_important': True, 'confidence': 0.5} for s in scenes]
+    if not analyzed_scenes:
+        analyzed_scenes = [{'start': s['start'], 'end': s['end'], 'scene_type': '未知'} for s in scenes]
+    
     GPUManager.clear()
+    
+    # 3.2 多维度重要性评分（音频能量+对话密度+情感关键词+场景变化）
+    try:
+        analyzed_scenes = calculate_importance_scores(
+            processed_video,
+            analyzed_scenes,
+            segments,  # 语音识别的对白片段
+            str(work_dir)
+        )
+    except Exception as e:
+        print(f"   [WARNING] 重要性评分失败: {e}，使用默认评分")
+        for s in analyzed_scenes:
+            s['importance'] = 0.5
+            s['is_important'] = True
     
     # ========== Step 4: 联网获取电影信息 ==========
     movie_info = None
@@ -254,26 +271,33 @@ async def full_auto_process(
         print("   [INFO] AI文案无效，跳过原声保留检测")
     
     # ========== Step 7: 智能剪辑 ==========
-    report_progress(7, "正在选取精彩片段并剪辑...")
+    report_progress(7, "正在基于重要性评分选取精彩片段...")
     
-    # 选取重要镜头
-    important_scenes = [s for s in analyzed_scenes if s.get('is_important', False)]
-    if len(important_scenes) == 0:
-        print("   [INFO] 未检测到重要镜头，使用所有镜头")
-        important_scenes = analyzed_scenes
-    
-    # 选取最佳片段
-    selected_clips = select_best_clips(important_scenes, target_duration)
+    # 使用智能重要性评分系统选取片段
+    selected_clips = select_important_clips(
+        analyzed_scenes,
+        target_duration,
+        min_clip_duration=2.0,   # 最短2秒
+        max_clip_duration=30.0  # 最长30秒
+    )
     
     if len(selected_clips) == 0:
-        print("   [INFO] 片段选取为空，使用前10个镜头")
+        print("   [WARNING] 智能选取为空，回退到传统方法")
+        # 回退：按时间顺序选取
         selected_clips = []
-        for s in analyzed_scenes[:10]:
-            if 'start' in s and 'end' in s:
+        total = 0
+        for s in analyzed_scenes:
+            if total >= target_duration:
+                break
+            dur = s.get('end', 0) - s.get('start', 0)
+            if dur > 1:
                 selected_clips.append({'start': s['start'], 'end': s['end']})
+                total += dur
     
     if len(selected_clips) == 0:
         raise RuntimeError("[ERROR] 无法选取任何有效片段")
+    
+    print(f"   选取了 {len(selected_clips)} 个重要片段")
     
     # 提取片段
     clip_dir = work_dir / "clips"

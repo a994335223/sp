@@ -1,11 +1,17 @@
-# core/intro_outro_detect.py - 片头片尾检测与去除
+# core/intro_outro_detect.py - 片头片尾检测与去除（增强版）
 """
-SmartVideoClipper - 片头片尾检测模块
+SmartVideoClipper - 片头片尾检测模块 v2.0
 
-功能: 自动检测并去除视频的片头（logo、黑屏）和片尾（演职员表、黑屏）
-用途: 在处理前先清理无用片段，提高剪辑质量
+多维度检测方法：
+1. 视觉检测：黑屏、静态画面、logo
+2. 音频检测：片头曲特征（音乐vs对话）
+3. 规则检测：国标规定片头≤90秒，片尾≤180秒
 
-依赖: opencv-python, numpy, ffmpeg
+参考标准：
+- 国家广播电视总局《电视剧母版制作规范》
+- 片头时长不超过90秒
+- 片尾时长不超过180秒
+- 正片时长不少于41分钟
 """
 
 import cv2
@@ -27,7 +33,6 @@ def get_video_duration(video_path: str) -> float:
         result = subprocess.run(cmd, capture_output=True, text=True)
         return float(result.stdout.strip())
     except:
-        # 使用OpenCV作为备选
         cap = cv2.VideoCapture(video_path)
         fps = cap.get(cv2.CAP_PROP_FPS)
         frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT)
@@ -35,162 +40,277 @@ def get_video_duration(video_path: str) -> float:
         return frame_count / fps if fps > 0 else 0
 
 
-def analyze_frame_brightness(frame: np.ndarray) -> float:
-    """分析帧的平均亮度（0-255）"""
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    return np.mean(gray)
-
-
-def analyze_frame_variance(frame: np.ndarray) -> float:
-    """分析帧的方差（用于检测纯色/黑屏）"""
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    return np.var(gray)
-
-
-def detect_intro_outro(
-    video_path: str,
-    max_intro_duration: float = 120.0,  # 最长片头时间（秒）
-    max_outro_duration: float = 180.0,  # 最长片尾时间（秒）
-    black_threshold: float = 15.0,       # 黑屏亮度阈值
-    variance_threshold: float = 100.0,   # 纯色方差阈值
-    sample_interval: float = 1.0         # 采样间隔（秒）
-) -> Tuple[float, float]:
+def analyze_audio_type(video_path: str, start: float, duration: float = 5.0) -> dict:
     """
-    检测视频的片头和片尾时间点
-    
-    检测策略：
-    1. 黑屏检测：连续黑屏帧
-    2. 静态画面检测：低方差帧（logo、字幕卡）
-    3. 场景变化检测：找到第一个明显场景变化点
-    
-    参数:
-        video_path: 视频路径
-        max_intro_duration: 最大片头时长
-        max_outro_duration: 最大片尾时长
-        black_threshold: 黑屏亮度阈值
-        variance_threshold: 纯色方差阈值
-        sample_interval: 采样间隔
+    分析指定时间段的音频类型
     
     返回:
-        (intro_end, outro_start): 片头结束时间, 片尾开始时间
+        - has_speech: 是否有人声对话
+        - has_music: 是否有背景音乐
+        - is_silent: 是否静音
     """
-    print(f"[DETECT] 正在检测片头片尾...")
+    try:
+        # 使用ffmpeg分析音频
+        cmd = [
+            'ffmpeg', '-y',
+            '-ss', str(start),
+            '-i', video_path,
+            '-t', str(duration),
+            '-af', 'volumedetect',
+            '-f', 'null', '-'
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='ignore')
+        
+        # 解析音量
+        mean_volume = -60
+        max_volume = -60
+        for line in result.stderr.split('\n'):
+            if 'mean_volume' in line:
+                try:
+                    mean_volume = float(line.split(':')[1].strip().replace(' dB', ''))
+                except:
+                    pass
+            if 'max_volume' in line:
+                try:
+                    max_volume = float(line.split(':')[1].strip().replace(' dB', ''))
+                except:
+                    pass
+        
+        # 判断音频类型
+        is_silent = mean_volume < -50
+        has_audio = mean_volume > -40
+        
+        # 音乐通常音量稳定，对话音量波动大
+        volume_range = max_volume - mean_volume
+        likely_music = has_audio and volume_range < 15  # 音乐音量波动小
+        likely_speech = has_audio and volume_range > 15  # 对话音量波动大
+        
+        return {
+            'mean_volume': mean_volume,
+            'max_volume': max_volume,
+            'is_silent': is_silent,
+            'likely_music': likely_music,
+            'likely_speech': likely_speech
+        }
+    except:
+        return {
+            'mean_volume': -60,
+            'max_volume': -60,
+            'is_silent': True,
+            'likely_music': False,
+            'likely_speech': False
+        }
+
+
+def analyze_frame_content(frame: np.ndarray) -> dict:
+    """分析帧内容特征"""
+    if frame is None:
+        return {'is_black': True, 'is_static': True, 'brightness': 0, 'variance': 0}
+    
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    brightness = np.mean(gray)
+    variance = np.var(gray)
+    
+    # 边缘检测（logo和字幕通常有清晰边缘）
+    edges = cv2.Canny(gray, 50, 150)
+    edge_density = np.mean(edges) / 255
+    
+    return {
+        'is_black': brightness < 20,
+        'is_static': variance < 200,
+        'brightness': brightness,
+        'variance': variance,
+        'edge_density': edge_density,
+        'has_text_like': edge_density > 0.05 and variance < 1000  # 可能有字幕/logo
+    }
+
+
+def detect_intro_enhanced(video_path: str, max_duration: float = 120.0) -> float:
+    """
+    增强版片头检测
+    
+    检测策略：
+    1. 前120秒内，找到"音乐→对话"的转换点
+    2. 如果有明显的黑屏或静态画面，以此为边界
+    3. 参考国标：片头不超过90秒
+    
+    返回：
+        片头结束时间（秒）
+    """
+    print("[INTRO] 检测片头...")
     
     if not os.path.exists(video_path):
-        raise FileNotFoundError(f"视频文件不存在: {video_path}")
+        return 0
+    
+    total_duration = get_video_duration(video_path)
+    if total_duration == 0:
+        return 0
+    
+    # 限制检测范围
+    check_duration = min(max_duration, total_duration * 0.15)  # 最多检测前15%
     
     cap = cv2.VideoCapture(video_path)
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    duration = total_frames / fps if fps > 0 else 0
+    fps = cap.get(cv2.CAP_PROP_FPS) or 25
     
-    if duration == 0:
-        cap.release()
-        return 0, duration
+    # 每3秒采样分析
+    interval = 3.0
+    analysis_results = []
     
-    # ===== 检测片头 =====
-    intro_end = 0
-    last_black_end = 0
-    frame_interval = int(fps * sample_interval)
-    
-    # 分析片头区域
-    intro_frames = int(min(max_intro_duration * fps, total_frames * 0.3))  # 最多分析前30%
-    prev_frame = None
-    significant_change_found = False
-    
-    for frame_idx in range(0, intro_frames, frame_interval):
-        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+    for t in np.arange(0, check_duration, interval):
+        # 视觉分析
+        cap.set(cv2.CAP_PROP_POS_MSEC, t * 1000)
         ret, frame = cap.read()
-        if not ret:
-            break
         
-        current_time = frame_idx / fps
-        brightness = analyze_frame_brightness(frame)
-        variance = analyze_frame_variance(frame)
+        visual = analyze_frame_content(frame if ret else None)
         
-        # 检测黑屏
-        if brightness < black_threshold:
-            last_black_end = current_time + sample_interval
-            continue
+        # 音频分析
+        audio = analyze_audio_type(video_path, t, interval)
         
-        # 检测低方差（可能是logo、字幕卡）
-        if variance < variance_threshold:
-            last_black_end = current_time + sample_interval
-            continue
-        
-        # 检测场景变化
-        if prev_frame is not None:
-            diff = cv2.absdiff(frame, prev_frame)
-            change = np.mean(diff)
-            if change > 30:  # 显著变化
-                if not significant_change_found:
-                    significant_change_found = True
-                    # 第一次显著变化可能是从片头到正片
-                    intro_end = max(last_black_end, current_time - sample_interval)
-                    break
-        
-        prev_frame = frame.copy()
-    
-    # 如果没有检测到明显片头，使用最后一个黑屏/静态画面时间
-    if intro_end == 0:
-        intro_end = last_black_end
-    
-    # ===== 检测片尾 =====
-    outro_start = duration
-    last_content_time = duration
-    
-    # 从视频末尾向前分析
-    outro_start_frame = max(0, total_frames - int(max_outro_duration * fps))
-    outro_start_frame = max(outro_start_frame, int(total_frames * 0.7))  # 至少从70%开始
-    
-    # 收集片尾区域的帧信息
-    outro_frames_data = []
-    for frame_idx in range(total_frames - 1, outro_start_frame, -frame_interval):
-        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
-        ret, frame = cap.read()
-        if not ret:
-            continue
-        
-        current_time = frame_idx / fps
-        brightness = analyze_frame_brightness(frame)
-        variance = analyze_frame_variance(frame)
-        
-        outro_frames_data.append({
-            'time': current_time,
-            'brightness': brightness,
-            'variance': variance,
-            'is_black': brightness < black_threshold,
-            'is_static': variance < variance_threshold * 2  # 片尾字幕容差更大
+        analysis_results.append({
+            'time': t,
+            'visual': visual,
+            'audio': audio
         })
-    
-    # 从后向前找第一个正常内容帧
-    continuous_end_frames = 0
-    for data in outro_frames_data:
-        if data['is_black'] or data['is_static']:
-            continuous_end_frames += 1
-        else:
-            # 找到正常内容
-            if continuous_end_frames >= 3:  # 连续3个异常帧才认为是片尾
-                outro_start = data['time'] + sample_interval
-            break
+        
+        # 打印分析过程
+        status = []
+        if visual['is_black']:
+            status.append('黑屏')
+        if visual['has_text_like']:
+            status.append('字幕/Logo')
+        if audio['likely_music']:
+            status.append('音乐')
+        if audio['likely_speech']:
+            status.append('对话')
+        if audio['is_silent']:
+            status.append('静音')
+        
+        print(f"   {t:.0f}s: {', '.join(status) if status else '正常画面'}")
     
     cap.release()
     
-    # 安全边界检查
-    intro_end = max(0, min(intro_end, duration * 0.3))  # 片头不超过30%
-    outro_start = max(duration * 0.7, min(outro_start, duration))  # 片尾不早于70%
+    # 寻找片头结束点
+    intro_end = 0
     
-    # 确保有效内容时长
-    if outro_start - intro_end < 60:  # 如果有效内容少于60秒，可能检测有误
-        print("   [WARNING] 检测到的有效内容过短，重置为全片")
-        intro_end = 0
-        outro_start = duration
+    # 策略1：找到第一个明显的对话开始点
+    for i, r in enumerate(analysis_results):
+        if r['audio']['likely_speech'] and not r['visual']['is_black']:
+            # 找到对话，回退一个间隔作为片头结束
+            intro_end = max(0, r['time'] - interval)
+            print(f"   [策略1] 检测到对话开始于 {r['time']:.0f}s，片头结束于 {intro_end:.0f}s")
+            break
     
-    print(f"   片头结束: {intro_end:.1f}秒")
-    print(f"   片尾开始: {outro_start:.1f}秒")
-    print(f"   有效内容: {intro_end:.1f}秒 - {outro_start:.1f}秒 ({outro_start - intro_end:.1f}秒)")
+    # 策略2：如果前面全是音乐，找音乐结束点
+    if intro_end == 0:
+        music_end = 0
+        for r in analysis_results:
+            if r['audio']['likely_music']:
+                music_end = r['time'] + interval
+            elif music_end > 0 and not r['audio']['likely_music']:
+                intro_end = music_end
+                print(f"   [策略2] 音乐结束于 {intro_end:.0f}s")
+                break
     
-    return intro_end, outro_start
+    # 策略3：找黑屏后的第一个正常画面
+    if intro_end == 0:
+        for i, r in enumerate(analysis_results):
+            if r['visual']['is_black'] and i + 1 < len(analysis_results):
+                next_r = analysis_results[i + 1]
+                if not next_r['visual']['is_black']:
+                    intro_end = next_r['time']
+                    print(f"   [策略3] 黑屏结束于 {intro_end:.0f}s")
+                    break
+    
+    # 限制：片头不超过90秒（国标）
+    if intro_end > 90:
+        print(f"   [限制] 片头超过90秒，按90秒处理")
+        intro_end = 90
+    
+    print(f"   片头时长: {intro_end:.0f}秒")
+    return intro_end
+
+
+def detect_outro_enhanced(video_path: str, max_duration: float = 180.0) -> float:
+    """
+    增强版片尾检测
+    
+    检测策略：
+    1. 从结尾向前，找到"对话→音乐/黑屏"的转换点
+    2. 检测演职员表特征（滚动文字）
+    3. 参考国标：片尾不超过180秒
+    
+    返回：
+        片尾开始时间（秒）
+    """
+    print("[OUTRO] 检测片尾...")
+    
+    if not os.path.exists(video_path):
+        return float('inf')
+    
+    total_duration = get_video_duration(video_path)
+    if total_duration == 0:
+        return float('inf')
+    
+    # 限制检测范围
+    check_duration = min(max_duration, total_duration * 0.15)
+    start_check = total_duration - check_duration
+    
+    cap = cv2.VideoCapture(video_path)
+    
+    # 每3秒采样分析
+    interval = 3.0
+    analysis_results = []
+    
+    for t in np.arange(start_check, total_duration, interval):
+        cap.set(cv2.CAP_PROP_POS_MSEC, t * 1000)
+        ret, frame = cap.read()
+        
+        visual = analyze_frame_content(frame if ret else None)
+        audio = analyze_audio_type(video_path, t, interval)
+        
+        analysis_results.append({
+            'time': t,
+            'visual': visual,
+            'audio': audio
+        })
+    
+    cap.release()
+    
+    # 从后向前寻找片尾开始点
+    outro_start = total_duration
+    
+    # 策略1：找到最后一段对话的结束点
+    last_speech_time = total_duration
+    for r in reversed(analysis_results):
+        if r['audio']['likely_speech'] and not r['visual']['is_black']:
+            last_speech_time = r['time'] + interval
+            break
+    
+    if last_speech_time < total_duration - 10:
+        outro_start = last_speech_time
+        print(f"   [策略1] 最后对话结束于 {outro_start:.0f}s")
+    
+    # 策略2：检测连续的黑屏或静态画面
+    static_start = None
+    for r in analysis_results:
+        if r['visual']['is_black'] or (r['audio']['likely_music'] and r['visual']['has_text_like']):
+            if static_start is None:
+                static_start = r['time']
+        else:
+            static_start = None
+    
+    if static_start and static_start < outro_start:
+        outro_start = static_start
+        print(f"   [策略2] 片尾画面开始于 {outro_start:.0f}s")
+    
+    # 限制：确保正片至少有一定时长
+    min_content_duration = total_duration * 0.7  # 正片至少占70%
+    if outro_start < min_content_duration:
+        outro_start = min_content_duration
+        print(f"   [限制] 确保正片时长，片尾开始于 {outro_start:.0f}s")
+    
+    print(f"   片尾时长: {total_duration - outro_start:.0f}秒")
+    return outro_start
 
 
 def trim_video(
@@ -199,33 +319,22 @@ def trim_video(
     start_time: float,
     end_time: float
 ) -> str:
-    """
-    裁剪视频，去除片头片尾
-    
-    参数:
-        video_path: 输入视频
-        output_path: 输出视频
-        start_time: 开始时间（秒）
-        end_time: 结束时间（秒）
-    
-    返回:
-        输出文件路径
-    """
+    """裁剪视频"""
     print(f"[TRIM] 裁剪视频: {start_time:.1f}s - {end_time:.1f}s")
     
-    # 确保输出目录存在
     output_dir = os.path.dirname(output_path)
     if output_dir:
         os.makedirs(output_dir, exist_ok=True)
     
     duration = end_time - start_time
     
+    # 快速裁剪（不重新编码）
     cmd = [
         'ffmpeg', '-y',
         '-ss', str(start_time),
         '-i', video_path,
         '-t', str(duration),
-        '-c', 'copy',  # 直接复制，不重新编码（更快）
+        '-c', 'copy',
         '-avoid_negative_ts', 'make_zero',
         '-loglevel', 'error',
         output_path
@@ -233,9 +342,8 @@ def trim_video(
     
     result = subprocess.run(cmd, capture_output=True, text=True)
     
-    # 如果copy模式失败，尝试重新编码
     if not os.path.exists(output_path) or os.path.getsize(output_path) < 1000:
-        print("   [INFO] 快速裁剪失败，尝试重新编码...")
+        print("   快速裁剪失败，尝试重新编码...")
         cmd = [
             'ffmpeg', '-y',
             '-ss', str(start_time),
@@ -253,41 +361,47 @@ def trim_video(
         print(f"[OK] 视频裁剪完成: {output_path}")
         return output_path
     else:
-        raise RuntimeError(f"[ERROR] 视频裁剪失败: {result.stderr[:200] if result.stderr else 'unknown'}")
+        raise RuntimeError(f"[ERROR] 视频裁剪失败")
 
 
 def auto_trim_intro_outro(
     video_path: str,
     output_path: str,
-    skip_if_short: float = 300.0  # 少于5分钟的视频跳过检测
+    skip_if_short: float = 300.0
 ) -> Tuple[str, float, float]:
     """
-    自动检测并去除片头片尾（一体化函数）
-    
-    参数:
-        video_path: 输入视频
-        output_path: 输出视频
-        skip_if_short: 短视频跳过阈值（秒）
+    自动检测并去除片头片尾
     
     返回:
         (output_path, intro_end, outro_start)
     """
     duration = get_video_duration(video_path)
     
-    # 短视频跳过检测
     if duration < skip_if_short:
         print(f"[SKIP] 视频较短({duration:.0f}秒)，跳过片头片尾检测")
         return video_path, 0, duration
     
-    # 检测片头片尾
-    intro_end, outro_start = detect_intro_outro(video_path)
+    # 检测片头
+    intro_end = detect_intro_enhanced(video_path)
     
-    # 如果检测到需要裁剪
-    if intro_end > 5 or (duration - outro_start) > 5:  # 至少5秒才裁剪
+    # 检测片尾
+    outro_start = detect_outro_enhanced(video_path)
+    
+    # 确保有效内容时长合理
+    content_duration = outro_start - intro_end
+    if content_duration < duration * 0.5:
+        print(f"[WARNING] 检测结果异常（内容仅{content_duration:.0f}秒），使用保守值")
+        intro_end = min(intro_end, 60)  # 最多去60秒片头
+        outro_start = max(outro_start, duration - 120)  # 最多去120秒片尾
+    
+    # 判断是否需要裁剪
+    if intro_end > 5 or (duration - outro_start) > 5:
+        print(f"\n[RESULT] 片头: 0-{intro_end:.0f}秒, 片尾: {outro_start:.0f}-{duration:.0f}秒")
+        print(f"[RESULT] 有效内容: {intro_end:.0f}秒 - {outro_start:.0f}秒 ({outro_start - intro_end:.0f}秒)")
         trimmed_path = trim_video(video_path, output_path, intro_end, outro_start)
         return trimmed_path, intro_end, outro_start
     else:
-        print("[SKIP] 未检测到明显片头片尾，使用原视频")
+        print("[SKIP] 未检测到明显片头片尾")
         return video_path, 0, duration
 
 
@@ -301,14 +415,15 @@ if __name__ == "__main__":
             print(f"测试视频: {test_video}")
             print("=" * 50)
             
-            # 检测
-            intro_end, outro_start = detect_intro_outro(test_video)
+            intro_end = detect_intro_enhanced(test_video)
+            outro_start = detect_outro_enhanced(test_video)
             
-            # 裁剪测试
-            output = test_video.replace('.mp4', '_trimmed.mp4')
-            trim_video(test_video, output, intro_end, outro_start)
+            duration = get_video_duration(test_video)
+            print(f"\n总时长: {duration:.0f}秒")
+            print(f"片头: 0-{intro_end:.0f}秒")
+            print(f"片尾: {outro_start:.0f}-{duration:.0f}秒")
+            print(f"正片: {intro_end:.0f}-{outro_start:.0f}秒 ({outro_start - intro_end:.0f}秒)")
         else:
             print(f"视频不存在: {test_video}")
     else:
         print("用法: python intro_outro_detect.py video.mp4")
-
