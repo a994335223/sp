@@ -224,3 +224,4 @@ pip-delete-this-directory.txt
 .env.local
 .env.*.local
 
+workspace_*

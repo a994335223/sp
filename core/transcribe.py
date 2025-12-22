@@ -69,14 +69,29 @@ def transcribe_video(video_path: str, output_srt: str = None):
     segments = []
     full_text = ""
     
+    # 导入敏感词过滤器
+    try:
+        from content_filter import filter_sensitive_content
+        use_filter = True
+    except ImportError:
+        use_filter = False
+    
     for seg in segments_list:
+        text = seg.text.strip()
+        
+        # 过滤敏感词
+        if use_filter:
+            text, removed = filter_sensitive_content(text)
+            if removed:
+                print(f"   [FILTER] 语音识别过滤敏感词: {removed}")
+        
         segment = {
             'start': seg.start,
             'end': seg.end,
-            'text': seg.text.strip()
+            'text': text
         }
         segments.append(segment)
-        full_text += seg.text
+        full_text += text
     
     print(f"[OK] 识别完成，共 {len(segments)} 个片段")
     

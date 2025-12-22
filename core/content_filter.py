@@ -1,0 +1,130 @@
+# core/content_filter.py - 内容过滤器
+"""
+SmartVideoClipper - 内容安全过滤
+
+功能：
+1. 过滤政治敏感词
+2. 过滤违规内容
+3. 过滤低质量内容
+
+必须在任何输出前调用！
+"""
+
+import re
+from typing import List, Tuple
+
+
+# 敏感词列表（持续更新）
+SENSITIVE_WORDS = [
+    # 政治人物
+    "习近平", "胡锦涛", "江泽民", "毛泽东", "邓小平", "温家宝", "李克强",
+    "习主席", "总书记", "国家主席", "中央领导",
+    # 政治术语
+    "共产党", "国民党", "民进党", "法轮功", "六四", "天安门",
+    "台独", "藏独", "疆独", "港独",
+    "反华", "辱华", "颠覆", "分裂",
+    # 其他敏感
+    "色情", "赌博", "毒品",
+]
+
+# 低质量内容模式
+LOW_QUALITY_PATTERNS = [
+    r"紧张的场面",  # 重复的无意义描述
+    r"紧张的一幕出现了",
+    r"此刻，紧张",
+    r"画面一转，紧张",
+    r"未知场景",
+    r"unknown",
+]
+
+
+def filter_sensitive_content(text: str) -> Tuple[str, List[str]]:
+    """
+    过滤敏感内容
+    
+    返回：(过滤后的文本, 被过滤的词列表)
+    """
+    filtered_words = []
+    result = text
+    
+    for word in SENSITIVE_WORDS:
+        if word in result:
+            filtered_words.append(word)
+            result = result.replace(word, "***")
+    
+    return result, filtered_words
+
+
+def is_low_quality(text: str) -> bool:
+    """检查是否是低质量内容"""
+    for pattern in LOW_QUALITY_PATTERNS:
+        if re.search(pattern, text):
+            return True
+    return False
+
+
+def filter_narration(narration: str) -> str:
+    """
+    过滤解说内容
+    
+    1. 移除敏感词
+    2. 检查质量
+    """
+    # 过滤敏感词
+    filtered, removed = filter_sensitive_content(narration)
+    
+    if removed:
+        print(f"   [FILTER] 已过滤敏感词: {removed}")
+    
+    # 如果内容太短或质量太低，返回空
+    if len(filtered.strip()) < 5:
+        return ""
+    
+    if is_low_quality(filtered):
+        return ""
+    
+    return filtered
+
+
+def filter_transcript(segments: list) -> list:
+    """过滤字幕内容"""
+    filtered_segments = []
+    
+    for seg in segments:
+        text = seg.get('text', '')
+        filtered_text, removed = filter_sensitive_content(text)
+        
+        if removed:
+            print(f"   [FILTER] 字幕过滤敏感词: {removed}")
+        
+        seg['text'] = filtered_text
+        filtered_segments.append(seg)
+    
+    return filtered_segments
+
+
+def validate_output(content: str) -> bool:
+    """验证输出内容是否安全"""
+    # 检查敏感词
+    for word in SENSITIVE_WORDS:
+        if word in content:
+            return False
+    
+    return True
+
+
+# 测试
+if __name__ == "__main__":
+    test_texts = [
+        "今天讲一个关于习近平的故事",
+        "这是一个紧张的场面",
+        "正常的解说内容",
+    ]
+    
+    for text in test_texts:
+        filtered, removed = filter_sensitive_content(text)
+        quality = "低质量" if is_low_quality(text) else "正常"
+        print(f"原文: {text}")
+        print(f"过滤后: {filtered}, 移除: {removed}, 质量: {quality}")
+        print()
+

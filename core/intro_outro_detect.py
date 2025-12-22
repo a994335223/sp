@@ -1,4 +1,4 @@
-# core/intro_outro_detect.py - 片头片尾检测与去除（增强版）
+# core/intro_outro_detect.py - 片头片尾检测与去除（增强版 + GPU加速）
 """
 SmartVideoClipper - 片头片尾检测模块 v2.0
 
@@ -19,6 +19,22 @@ import numpy as np
 import subprocess
 import os
 from typing import Tuple, Optional
+
+# 导入GPU编码器
+try:
+    from gpu_encoder import get_video_codec_args
+except ImportError:
+    def get_video_codec_args(quality='fast'):
+        return ['-c:v', 'libx264', '-preset', 'fast']
+
+# 导入中文路径处理
+try:
+    from ffmpeg_utils import prepare_input_video, cleanup_temp
+except ImportError:
+    def prepare_input_video(path):
+        return path, False
+    def cleanup_temp(path, needs_cleanup):
+        pass
 
 
 def get_video_duration(video_path: str) -> float:
@@ -384,14 +400,14 @@ def trim_video(
     result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='ignore')
     
     if not os.path.exists(output_path) or os.path.getsize(output_path) < 1000:
-        print("   快速裁剪失败，尝试重新编码...")
+        print("   快速裁剪失败，尝试重新编码（GPU加速）...")
+        video_codec_args = get_video_codec_args('fast')
         cmd = [
             'ffmpeg', '-y',
             '-ss', str(start_time),
             '-i', video_path,
             '-t', str(duration),
-            '-c:v', 'libx264',
-            '-preset', 'fast',
+        ] + video_codec_args + [  # GPU加速编码
             '-c:a', 'aac',
             '-loglevel', 'error',
             output_path
@@ -416,34 +432,51 @@ def auto_trim_intro_outro(
     返回:
         (output_path, intro_end, outro_start)
     """
-    duration = get_video_duration(video_path)
+    # 处理中文路径（创建临时硬链接）
+    safe_video_path, needs_cleanup = prepare_input_video(video_path)
     
-    if duration < skip_if_short:
-        print(f"[SKIP] 视频较短({duration:.0f}秒)，跳过片头片尾检测")
-        return video_path, 0, duration
+    try:
+        duration = get_video_duration(safe_video_path)
+        
+        if duration < skip_if_short:
+            print(f"[SKIP] 视频较短({duration:.0f}秒)，跳过片头片尾检测")
+            return video_path, 0, duration
+        
+        # 检测片头（使用安全路径）
+        intro_end = detect_intro_enhanced(safe_video_path)
+        
+        # 检测片尾（使用安全路径）
+        outro_start = detect_outro_enhanced(safe_video_path)
+        
+        # 确保有效内容时长合理
+        content_duration = outro_start - intro_end
+        if content_duration < duration * 0.5:
+            print(f"[WARNING] 检测结果异常（内容仅{content_duration:.0f}秒），使用保守值")
+            intro_end = min(intro_end, 60)  # 最多去60秒片头
+            outro_start = max(outro_start, duration - 120)  # 最多去120秒片尾
+        
+        # 判断是否需要裁剪
+        if intro_end > 5 or (duration - outro_start) > 5:
+            print(f"\n[RESULT] 片头: 0-{intro_end:.0f}秒, 片尾: {outro_start:.0f}-{duration:.0f}秒")
+            print(f"[RESULT] 有效内容: {intro_end:.0f}秒 - {outro_start:.0f}秒 ({outro_start - intro_end:.0f}秒)")
+            
+            # 构建输出文件路径
+            # 如果output_path是目录，则添加文件名
+            if os.path.isdir(output_path):
+                trimmed_file = os.path.join(output_path, "trimmed_video.mp4")
+            else:
+                trimmed_file = output_path
+            
+            # 裁剪时使用安全路径
+            trimmed_path = trim_video(safe_video_path, trimmed_file, intro_end, outro_start)
+            return trimmed_path, intro_end, outro_start
+        else:
+            print("[SKIP] 未检测到明显片头片尾")
+            return video_path, 0, duration
     
-    # 检测片头
-    intro_end = detect_intro_enhanced(video_path)
-    
-    # 检测片尾
-    outro_start = detect_outro_enhanced(video_path)
-    
-    # 确保有效内容时长合理
-    content_duration = outro_start - intro_end
-    if content_duration < duration * 0.5:
-        print(f"[WARNING] 检测结果异常（内容仅{content_duration:.0f}秒），使用保守值")
-        intro_end = min(intro_end, 60)  # 最多去60秒片头
-        outro_start = max(outro_start, duration - 120)  # 最多去120秒片尾
-    
-    # 判断是否需要裁剪
-    if intro_end > 5 or (duration - outro_start) > 5:
-        print(f"\n[RESULT] 片头: 0-{intro_end:.0f}秒, 片尾: {outro_start:.0f}-{duration:.0f}秒")
-        print(f"[RESULT] 有效内容: {intro_end:.0f}秒 - {outro_start:.0f}秒 ({outro_start - intro_end:.0f}秒)")
-        trimmed_path = trim_video(video_path, output_path, intro_end, outro_start)
-        return trimmed_path, intro_end, outro_start
-    else:
-        print("[SKIP] 未检测到明显片头片尾")
-        return video_path, 0, duration
+    finally:
+        # 清理临时链接
+        cleanup_temp(safe_video_path, needs_cleanup)
 
 
 # 测试

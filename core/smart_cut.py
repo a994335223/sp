@@ -1,9 +1,10 @@
-# core/smart_cut.py - 智能剪辑
+# core/smart_cut.py - 智能剪辑 (GPU加速版)
 """
 SmartVideoClipper - 智能剪辑模块
 
 功能: 使用FFmpeg进行视频片段提取和拼接
 用途: 从长视频中提取精华片段
+特性: 支持GPU硬件加速编码
 
 依赖: ffmpeg (需要安装并添加到PATH)
 """
@@ -12,60 +13,40 @@ import subprocess
 import os
 import re
 
-
-def get_video_encoder():
-    """检测NVIDIA NVENC硬件加速支持"""
-    try:
-        result = subprocess.run(
-            ['ffmpeg', '-hide_banner', '-encoders'],
-            capture_output=True, text=True, encoding='utf-8', errors='ignore'
-        )
-        if 'h264_nvenc' in result.stdout:
-            print("[GPU] 检测到NVENC硬件编码支持")
-            return 'h264_nvenc'
-    except:
-        pass
-    print("[CPU] 使用CPU编码")
-    return 'libx264'
-
-
-# 全局编码器
-VIDEO_ENCODER = get_video_encoder()
+# 导入GPU编码器（统一管理）
+try:
+    from gpu_encoder import get_video_codec_args, is_hardware_available, get_encoder
+    GPU_AVAILABLE = True
+    # 兼容旧代码
+    VIDEO_ENCODER = get_encoder().available_encoder if is_hardware_available() else 'libx264'
+except ImportError:
+    GPU_AVAILABLE = False
+    VIDEO_ENCODER = 'libx264'
+    def get_video_codec_args(quality='fast'):
+        return ['-c:v', 'libx264', '-preset', 'fast']
+    def is_hardware_available():
+        return False
 
 
 def extract_single_clip(video_path: str, start: float, duration: float, output_path: str, use_gpu: bool = True):
     """
-    提取单个视频片段，带备选方案
+    提取单个视频片段，带备选方案（GPU加速）
     
     返回: (success: bool, error_msg: str)
     """
-    # 构建命令 - GPU 版本
-    if use_gpu and VIDEO_ENCODER == 'h264_nvenc':
-        cmd = [
-            'ffmpeg', '-y',
-            '-ss', str(start),
-            '-i', video_path,
-            '-t', str(duration),
-            '-c:v', 'h264_nvenc',
-            '-preset', 'fast',
-            '-c:a', 'aac',
-            '-loglevel', 'error',
-            output_path
-        ]
-    else:
-        # CPU 版本
-        cmd = [
-            'ffmpeg', '-y',
-            '-ss', str(start),
-            '-i', video_path,
-            '-t', str(duration),
-            '-c:v', 'libx264',
-            '-preset', 'fast',
-            '-crf', '23',
-            '-c:a', 'aac',
-            '-loglevel', 'error',
-            output_path
-        ]
+    # 使用统一的GPU编码器
+    video_codec_args = get_video_codec_args('fast')
+    
+    cmd = [
+        'ffmpeg', '-y',
+        '-ss', str(start),
+        '-i', video_path,
+        '-t', str(duration),
+    ] + video_codec_args + [  # GPU加速编码
+        '-c:a', 'aac',
+        '-loglevel', 'error',
+        output_path
+    ]
     
     result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='ignore')
     
@@ -217,15 +198,16 @@ def concat_clips(clip_files: list, output_path: str):
     
     result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='ignore')
     
-    # 如果 copy 模式失败，尝试重新编码
+    # 如果 copy 模式失败，尝试重新编码（GPU加速）
     if not os.path.exists(output_path) or os.path.getsize(output_path) < 1000:
-        print("   [INFO] copy模式失败，尝试重新编码...")
+        print("   [INFO] copy模式失败，尝试重新编码（GPU加速）...")
+        video_codec_args = get_video_codec_args('fast')
         cmd = [
             'ffmpeg', '-y',
             '-f', 'concat',
             '-safe', '0',
             '-i', list_file,
-            '-c:v', 'libx264',
+        ] + video_codec_args + [  # GPU加速编码
             '-c:a', 'aac',
             '-loglevel', 'error',
             output_path

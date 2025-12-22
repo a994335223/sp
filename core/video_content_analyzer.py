@@ -136,19 +136,21 @@ class VideoContentAnalyzer:
                 scene_start = scene_start / fps
                 scene_end = scene_end / fps
             
-            # 分析视觉内容
-            visual_content = ""
-            scene_type = "unknown"
+            # 分析视觉内容（仅用于判断场景类型，不用于生成解说）
+            visual_content = ""  # 不再使用CLIP结果作为解说内容
+            scene_type = "dialogue"  # 默认为对话场景
             
+            # CLIP分析只用于判断是否是动作场景（决定是否保留原声）
             if self.clip_model:
                 mid_time = (scene_start + scene_end) / 2
                 cap.set(cv2.CAP_PROP_POS_MSEC, mid_time * 1000)
                 ret, frame = cap.read()
                 
                 if ret and frame is not None:
-                    visual_content, scene_type = self._analyze_frame_content(
+                    _, scene_type = self._analyze_frame_content(
                         frame, scene_labels
                     )
+                    # visual_content 不再使用CLIP结果，改为基于对话内容
             
             # 获取该场景的对话
             scene_dialogues = []
@@ -173,12 +175,19 @@ class VideoContentAnalyzer:
                 dialogue_text, visual_content, scene_type, emotion
             )
             
+            # visual_content 基于对话内容生成简短描述，而非CLIP分析
+            if dialogue_text:
+                # 提取对话的核心内容作为场景描述
+                visual_content = dialogue_text[:50] + "..." if len(dialogue_text) > 50 else dialogue_text
+            else:
+                visual_content = f"场景{i+1}"
+            
             analyzed_scene = {
                 'scene_id': i + 1,
                 'start_time': scene_start,
                 'end_time': scene_end,
                 'duration': scene_end - scene_start,
-                'visual_content': visual_content,
+                'visual_content': visual_content,  # 现在基于对话内容
                 'dialogue': dialogue_text[:200] if dialogue_text else '',
                 'emotion': emotion,
                 'scene_type': scene_type,
@@ -262,19 +271,17 @@ class VideoContentAnalyzer:
         scene_type: str,
         emotion: str
     ) -> bool:
-        """判断是否应该保留原声"""
-        # 重要对话场景保留原声
-        if scene_type == 'dialogue' and len(dialogue) > 30:
+        """
+        判断是否应该保留原声
+        
+        原则：只有真正精彩的对白才保留原声，其他用解说
+        比例大约：20%原声，80%解说
+        """
+        # 只有非常长的重要对话才保留原声（台词很精彩）
+        if len(dialogue) > 80 and emotion in ['tense', 'sad', 'angry']:
             return True
         
-        # 高情感强度场景保留原声
-        if emotion in ['tense', 'sad', 'angry']:
-            return True
-        
-        # 动作场景保留原声
-        if scene_type == 'action':
-            return True
-        
+        # 其他情况都用解说覆盖
         return False
     
     def _calculate_importance(
@@ -359,48 +366,67 @@ class VideoContentAnalyzer:
         return result_scenes
     
     def _generate_single_narration(self, scene: Dict, style: str) -> str:
-        """为单个场景生成解说"""
-        visual = scene.get('visual_content', '')
-        dialogue = scene.get('dialogue', '')
+        """
+        为单个场景生成解说
+        
+        核心原则：基于对话内容生成解说，不是基于画面分类
+        """
+        dialogue = scene.get('dialogue', '').strip()
         emotion = scene.get('emotion', 'neutral')
         scene_type = scene.get('scene_type', 'unknown')
+        start_time = scene.get('start_time', 0)
         
-        # 基于场景内容生成解说
-        # 这里可以用AI，但先用模板确保基本可用
+        # 如果没有对话，生成简短过渡
+        if not dialogue or len(dialogue) < 5:
+            return ""  # 返回空，不生成无意义的解说
         
-        narration_templates = {
-            'dialogue': [
-                f"画面中，{visual}。",
-                f"此时，{visual}。",
-                f"镜头里，{visual}。",
-            ],
-            'action': [
-                f"紧张的一幕出现了，{visual}。",
-                f"画面急转，{visual}。",
-                f"此刻，{visual}。",
-            ],
-            'emotion': [
-                f"情绪达到顶点，{visual}。",
-                f"令人动容的一幕，{visual}。",
-                f"在这一刻，{visual}。",
-            ],
-            'transition': [
-                f"画面一转，{visual}。",
-                f"镜头切换到，{visual}。",
-                f"接下来，{visual}。",
-            ],
-        }
+        # 基于对话内容生成解说
+        # 核心：概括对话内容，而不是描述画面
         
-        templates = narration_templates.get(scene_type, narration_templates['transition'])
+        # 清理对话中的敏感词
+        try:
+            from .content_filter import filter_sensitive_content
+        except ImportError:
+            try:
+                from content_filter import filter_sensitive_content
+            except ImportError:
+                def filter_sensitive_content(text):
+                    return text, []
         
-        import random
-        base_narration = random.choice(templates)
+        dialogue, _ = filter_sensitive_content(dialogue)
         
-        # 如果有对话，可以提及
-        if dialogue and len(dialogue) > 10:
-            base_narration += f" {dialogue[:50]}..."
+        if not dialogue.strip():
+            return ""
         
-        return base_narration
+        # 根据对话长度和情感生成解说
+        if len(dialogue) > 50:
+            # 长对话：提取核心
+            if emotion == 'tense':
+                narration = f"此时气氛紧张，{dialogue[:60]}..."
+            elif emotion == 'sad':
+                narration = f"情绪低落中，{dialogue[:60]}..."
+            elif emotion == 'angry':
+                narration = f"冲突爆发，{dialogue[:60]}..."
+            else:
+                narration = f"{dialogue[:80]}..."
+        else:
+            # 短对话：直接使用或简单概括
+            narration = dialogue
+        
+        # 过滤低质量内容
+        try:
+            from .content_filter import is_low_quality
+        except ImportError:
+            try:
+                from content_filter import is_low_quality
+            except ImportError:
+                def is_low_quality(text):
+                    return False
+        
+        if is_low_quality(narration):
+            return ""
+        
+        return narration
 
 
 def create_scene_based_timeline(

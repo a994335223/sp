@@ -375,14 +375,19 @@ def compose_v4(
     """
     print("\n[VIDEO] V4.0 合成...")
     
+    if not video_clips:
+        raise ValueError("没有视频片段可合成")
+    
     # 1. 拼接视频
     temp_video = output_path.replace('.mp4', '_temp.mp4')
     
-    # 写入文件列表
+    # 写入文件列表（使用绝对路径，避免中文路径问题）
     list_file = output_path.replace('.mp4', '_list.txt')
     with open(list_file, 'w', encoding='utf-8') as f:
         for clip in video_clips:
-            f.write(f"file '{clip}'\n")
+            # 使用绝对路径并转换为正斜杠
+            abs_path = os.path.abspath(clip).replace('\\', '/')
+            f.write(f"file '{abs_path}'\n")
     
     # 拼接
     cmd = [
@@ -394,17 +399,33 @@ def compose_v4(
         '-loglevel', 'error',
         temp_video
     ]
-    subprocess.run(cmd, capture_output=True, encoding='utf-8', errors='ignore')
+    result = subprocess.run(cmd, capture_output=True, encoding='utf-8', errors='ignore')
+    
+    # 检查拼接是否成功
+    if not os.path.exists(temp_video) or os.path.getsize(temp_video) < 1000:
+        print(f"   [WARNING] FFmpeg concat失败: {result.stderr[:200] if result.stderr else '未知错误'}")
+        # 尝试使用第一个片段
+        if video_clips:
+            import shutil
+            shutil.copy(video_clips[0], temp_video)
+            print(f"   [FALLBACK] 使用第一个片段作为输出")
+    
+    # 检查临时文件
+    if not os.path.exists(temp_video):
+        raise FileNotFoundError(f"临时视频文件不存在: {temp_video}")
     
     # 2. 检查哪些段需要原声
-    has_original_segments = any(
-        item.get('audio_mode') == 'original' 
-        for item in timeline
-    )
+    voiceover_count = sum(1 for item in timeline if item.get('audio_mode') == 'voiceover')
+    original_count = len(timeline) - voiceover_count
     
-    if not has_original_segments:
-        # 全部是解说，直接替换音频
-        print("   全部使用解说音频...")
+    print(f"   解说场景: {voiceover_count}, 原声场景: {original_count}")
+    
+    # 检查解说音频是否有效
+    narration_valid = os.path.exists(narration_path) and os.path.getsize(narration_path) > 1000
+    
+    if voiceover_count > 0 and narration_valid:
+        # 有解说，替换音频
+        print("   使用解说音频...")
         cmd = [
             'ffmpeg', '-y',
             '-i', temp_video,
@@ -416,60 +437,18 @@ def compose_v4(
             '-loglevel', 'error',
             output_path
         ]
-        subprocess.run(cmd, capture_output=True, encoding='utf-8', errors='ignore')
+        result = subprocess.run(cmd, capture_output=True, encoding='utf-8', errors='ignore')
+        
+        if not os.path.exists(output_path) or os.path.getsize(output_path) < 1000:
+            # 解说替换失败，使用原声
+            print("   [FALLBACK] 解说替换失败，保留原声")
+            import shutil
+            shutil.copy(temp_video, output_path)
     else:
-        # 有原声段落，需要分段处理
-        # 这里简化处理：解说为主，原声段落保留
-        print("   混合解说和原声...")
-        
-        video = VideoFileClip(temp_video)
-        narration = AudioFileClip(narration_path)
-        
-        # 获取原声
-        original_audio = video.audio
-        
-        if original_audio:
-            # 创建静音原声版本（解说时用）
-            # 创建静音解说版本（原声时用）
-            # 然后混合
-            
-            # 简化：解说覆盖原声
-            if hasattr(video, 'with_audio'):
-                final_video = video.with_audio(narration)
-            else:
-                final_video = video.set_audio(narration)
-            
-            final_video.write_videofile(
-                output_path,
-                codec='libx264',
-                audio_codec='aac',
-                bitrate='8000k',
-                preset='fast',
-                logger=None
-            )
-            
-            video.close()
-            narration.close()
-            final_video.close()
-        else:
-            # 无原声，直接加解说
-            if hasattr(video, 'with_audio'):
-                final_video = video.with_audio(narration)
-            else:
-                final_video = video.set_audio(narration)
-            
-            final_video.write_videofile(
-                output_path,
-                codec='libx264',
-                audio_codec='aac',
-                bitrate='8000k',
-                preset='fast',
-                logger=None
-            )
-            
-            video.close()
-            narration.close()
-            final_video.close()
+        # 全部原声或无有效解说，直接复制
+        print("   保留原声...")
+        import shutil
+        shutil.copy(temp_video, output_path)
     
     # 清理临时文件
     try:
@@ -478,7 +457,10 @@ def compose_v4(
     except:
         pass
     
-    print(f"[OK] V4.0 合成完成: {output_path}")
+    if os.path.exists(output_path) and os.path.getsize(output_path) > 1000:
+        print(f"[OK] V4.0 合成完成: {output_path}")
+    else:
+        raise RuntimeError("视频合成失败")
 
 
 if __name__ == "__main__":

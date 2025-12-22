@@ -1,6 +1,8 @@
-# app/gradio_ui.py - 完整的Gradio界面
+# app/gradio_ui.py - 完整的Gradio界面 v5.1 (电影/电视剧分离版)
 """
-SmartVideoClipper - Web界面
+SmartVideoClipper v5.1 - Web界面
+
+🎬 核心升级：电影与电视剧模式分离
 
 功能: 提供友好的Web界面，一键处理视频
 特点: 无需命令行操作，小白也能用
@@ -29,11 +31,18 @@ PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(PROJECT_ROOT / "core"))
 
-# 导入主处理函数
-try:
-    from .main_auto import full_auto_process, PROCESS_STEPS, TOTAL_STEPS
-except ImportError:
-    from main_auto import full_auto_process, PROCESS_STEPS, TOTAL_STEPS
+# 定义处理步骤（v5.1版本）
+PROCESS_STEPS = [
+    (0, "预处理", "检测并去除片头片尾"),
+    (1, "语音识别", "识别视频中的对话"),
+    (2, "场景分析", "分析视频场景和剧情"),
+    (3, "智能解说", "生成解说文案（电影/电视剧模式）"),
+    (4, "时长控制", "智能选择场景"),
+    (5, "TTS合成", "生成解说语音"),
+    (6, "片段处理", "处理视频片段"),
+    (7, "输出成品", "生成最终视频"),
+]
+TOTAL_STEPS = len(PROCESS_STEPS)
 
 
 class ProgressTracker:
@@ -90,24 +99,36 @@ class ProgressTracker:
 
 
 def run_async_process(tracker: ProgressTracker, video_file: str, movie_name: str, 
-                      style: str, target_duration: int, use_internet: bool):
-    """在新线程中运行异步处理"""
+                      style: str, target_duration: int, media_type: str, episode: int):
+    """在新线程中运行异步处理（v5.1版本）"""
     
-    def progress_callback(current_step, total_steps, step_name, detail):
-        tracker.update(current_step, total_steps, step_name, detail)
+    def progress_callback(step, message, pct):
+        tracker.update(step, TOTAL_STEPS, PROCESS_STEPS[min(step, len(PROCESS_STEPS)-1)][1], message)
     
     async def async_task():
         try:
-            result = await full_auto_process(
-                input_video=video_file,
-                movie_name=movie_name if movie_name else None,
-                output_name="gradio_output",
+            # 使用v5.1 pipeline
+            from pipeline_v5 import VideoPipelineV5
+            
+            pipeline = VideoPipelineV5()
+            
+            # 生成输出名称
+            output_name = movie_name if movie_name else "gradio_output"
+            output_name = output_name.replace(" ", "_") + "_v5"
+            
+            result = await pipeline.process(
+                video_path=video_file,
+                output_name=output_name,
+                title=movie_name if movie_name else "",
                 style=style,
-                use_internet=use_internet,
-                target_duration=int(target_duration),
+                min_duration=max(60, int(target_duration) - 60),
+                max_duration=int(target_duration) + 120,
+                media_type=media_type,
+                episode=int(episode) if episode else 0,
                 progress_callback=progress_callback
             )
-            tracker.result = result
+            
+            tracker.result = result.get('output_video', '')
         except Exception as e:
             tracker.error = str(e)
             import traceback
@@ -124,8 +145,8 @@ def run_async_process(tracker: ProgressTracker, video_file: str, movie_name: str
         loop.close()
 
 
-def process_video_with_progress(video_file, movie_name, style, target_duration, use_internet) -> Generator:
-    """带进度显示的视频处理函数（生成器）"""
+def process_video_with_progress(video_file, movie_name, style, target_duration, media_type, episode) -> Generator:
+    """带进度显示的视频处理函数（生成器）- v5.1版本"""
     
     if video_file is None:
         yield None, "[ERROR] 请先上传视频", None, None
@@ -135,10 +156,20 @@ def process_video_with_progress(video_file, movie_name, style, target_duration, 
     tracker = ProgressTracker()
     tracker.is_running = True
     
+    # 显示开始信息
+    media_type_cn = "电视剧" if media_type == "tv" else "电影"
+    start_msg = f"[开始] {media_type_cn}模式 - "
+    if media_type == "tv":
+        start_msg += f"第{episode}集（60%解说+40%原声）"
+    else:
+        start_msg += f"精彩片段集锦（40%解说+60%原声）"
+    
+    yield None, start_msg, None, None
+    
     # 在新线程中运行处理任务
     process_thread = threading.Thread(
         target=run_async_process,
-        args=(tracker, video_file, movie_name, style, target_duration, use_internet)
+        args=(tracker, video_file, movie_name, style, target_duration, media_type, episode)
     )
     process_thread.start()
     
@@ -154,15 +185,24 @@ def process_video_with_progress(video_file, movie_name, style, target_duration, 
     if tracker.error:
         yield None, f"[ERROR] 处理失败: {tracker.error}", None, None
     elif tracker.result:
-        work_dir = Path("workspace_gradio_output")
-        cover_path = str(work_dir / "cover.jpg") if (work_dir / "cover.jpg").exists() else None
-        subtitle_path = str(work_dir / "subtitles.srt") if (work_dir / "subtitles.srt").exists() else None
+        # 找到实际的工作目录
+        work_dirs = list(PROJECT_ROOT.glob("workspace_*_v5"))
+        work_dir = work_dirs[-1] if work_dirs else None
+        
+        cover_path = None
+        subtitle_path = None
+        if work_dir:
+            cover_file = work_dir / "cover.jpg"
+            subtitle_file = work_dir / "subtitles.srt"
+            cover_path = str(cover_file) if cover_file.exists() else None
+            subtitle_path = str(subtitle_file) if subtitle_file.exists() else None
         
         final_status = f"""[OK] 处理完成！
 
 --- 处理结果 ---
 {tracker._get_steps_status()}
 
+媒体类型: {media_type_cn}
 输出文件: {tracker.result}
 """
         yield tracker.result, final_status, cover_path, subtitle_path
@@ -171,25 +211,27 @@ def process_video_with_progress(video_file, movie_name, style, target_duration, 
 
 
 def create_demo():
-    """创建Gradio界面"""
+    """创建Gradio界面 - v5.1版本"""
     
     with gr.Blocks(
-        title="SmartVideoClipper - 智能视频解说生成器",
+        title="SmartVideoClipper v5.1 - 智能视频解说",
         theme=gr.themes.Soft()
     ) as demo:
         
         # 标题
         gr.Markdown("""
-        # SmartVideoClipper v4.0
-        ### 智能视频解说生成器 - 比NarratoAI更强大！
+        # 🎬 SmartVideoClipper v5.1
+        ### 全球第一的智能视频解说生成器 - 电影/电视剧分离版
         
-        > 支持2小时电影 / 50分钟电视剧 | 全自动处理，无需人工干预 | 多种解说风格可选
+        > 🎥 **电影模式**: 精彩片段集锦（40%解说+60%原声）  
+        > 📺 **电视剧模式**: 讲述本集故事（60%解说+40%原声）  
+        > ✨ 全自动处理，GPU加速，无需人工干预
         """)
         
         with gr.Row():
             with gr.Column(scale=1):
                 # 输入区域
-                gr.Markdown("### 输入")
+                gr.Markdown("### 📁 输入设置")
                 
                 video_input = gr.Video(
                     label="上传视频",
@@ -197,10 +239,34 @@ def create_demo():
                 )
                 
                 movie_name = gr.Textbox(
-                    label="电影/剧名（可选，用于联网搜索信息）",
-                    placeholder="例如：复仇者联盟",
+                    label="作品名称（可选，用于获取剧情信息）",
+                    placeholder="例如：狂飙、复仇者联盟",
                     value=""
                 )
+                
+                # 🆕 媒体类型选择（核心功能）
+                gr.Markdown("### 🎯 媒体类型（重要！）")
+                
+                media_type = gr.Radio(
+                    label="选择类型",
+                    choices=[
+                        ("🎥 电影（精彩片段集锦）", "movie"),
+                        ("📺 电视剧（讲述本集故事）", "tv")
+                    ],
+                    value="tv",
+                    info="电视剧会有更多解说，电影保留更多原声"
+                )
+                
+                episode = gr.Number(
+                    label="第几集/第几部（电视剧必填，电影可选）",
+                    value=1,
+                    minimum=1,
+                    maximum=999,
+                    step=1,
+                    info="电视剧：第几集 | 系列电影：第几部"
+                )
+                
+                gr.Markdown("### ⚙️ 其他设置")
                 
                 style = gr.Dropdown(
                     label="解说风格",
@@ -211,18 +277,14 @@ def create_demo():
                 target_duration = gr.Slider(
                     label="目标时长（秒）",
                     minimum=60,
-                    maximum=600,
-                    value=240,
-                    step=30
-                )
-                
-                use_internet = gr.Checkbox(
-                    label="联网搜索电影信息（增强解说质量）",
-                    value=True
+                    maximum=900,
+                    value=300,
+                    step=30,
+                    info="建议：电视剧3-5分钟，电影5-10分钟"
                 )
                 
                 process_btn = gr.Button(
-                    "开始处理",
+                    "🚀 开始处理",
                     variant="primary",
                     size="lg"
                 )
@@ -254,25 +316,36 @@ def create_demo():
         # 使用说明
         gr.Markdown("""
         ---
-        ### 使用说明
+        ### 📖 使用说明
+        
+        #### 🎯 核心概念：电影 vs 电视剧模式
+        
+        | 模式 | 解说比例 | 适用场景 | 效果 |
+        |------|----------|----------|------|
+        | 🎥 电影 | 40%解说+60%原声 | 精彩片段集锦 | 保留经典台词 |
+        | 📺 电视剧 | 60%解说+40%原声 | 3分钟看完一集 | 快速了解剧情 |
+        
+        #### 📝 操作步骤
         
         1. **上传视频**: 支持 MP4, MKV, AVI 等常见格式
-        2. **填写名称**: 可选，填写后会联网搜索电影信息，提升解说质量
-        3. **选择风格**: 根据视频类型选择合适的解说风格
-        4. **调整时长**: 生成视频的目标时长（建议3-5分钟）
+        2. **选择类型**: ⚠️ **重要！** 根据视频内容选择电影或电视剧
+        3. **填写集数**: 电视剧必须填写第几集，电影可选
+        4. **选择风格**: 根据视频氛围选择合适的解说风格
         5. **开始处理**: 点击按钮，等待处理完成
         
-        **处理时间参考**:
+        #### ⏱️ 处理时间参考（GPU加速）
         - 50分钟电视剧: 约10-15分钟
-        - 2小时电影: 约25-35分钟
+        - 2小时电影: 约20-30分钟
         
-        **提示**: 首次使用需要下载AI模型，可能需要较长时间
+        #### 💡 提示
+        - 文件名包含"E01"等标记会自动识别为电视剧
+        - 首次使用需要下载AI模型，可能需要较长时间
         """)
         
         # 绑定事件 - 使用生成器实现实时进度更新
         process_btn.click(
             fn=process_video_with_progress,
-            inputs=[video_input, movie_name, style, target_duration, use_internet],
+            inputs=[video_input, movie_name, style, target_duration, media_type, episode],
             outputs=[video_output, status, cover_output, subtitle_output]
         )
     

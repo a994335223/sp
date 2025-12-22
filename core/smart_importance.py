@@ -439,8 +439,87 @@ def select_important_clips(
     return selected
 
 
+def calculate_scene_importance(
+    dialogue: str,
+    duration: float,
+    emotion: str = 'neutral'
+) -> float:
+    """
+    计算单个场景的重要性分数
+    
+    简化版本，用于快速评估
+    
+    参数：
+        dialogue: 场景对话内容
+        duration: 场景时长
+        emotion: 情感类型
+    
+    返回：
+        0-1 的重要性分数
+    """
+    score = 0.3  # 基础分
+    
+    # 1. 对话长度加分（有对话更重要）
+    if dialogue:
+        dialogue_len = len(dialogue)
+        if dialogue_len > 50:
+            score += 0.3
+        elif dialogue_len > 20:
+            score += 0.2
+        elif dialogue_len > 5:
+            score += 0.1
+    
+    # 2. 情感加分
+    emotion_weights = {
+        'angry': 0.3,
+        'sad': 0.25,
+        'excited': 0.3,
+        'happy': 0.2,
+        'fear': 0.25,
+        'neutral': 0
+    }
+    score += emotion_weights.get(emotion, 0)
+    
+    # 3. 情感关键词加分
+    high_keywords = ['杀', '死', '爱', '恨', '救', '跑', '危险', '完了', '为什么', 
+                     '不要', '求求', '对不起', '真相', '秘密', '发现', '知道了']
+    medium_keywords = ['重要', '必须', '一定', '绝对', '突然', '终于', '原来', '不可能']
+    
+    if dialogue:
+        for kw in high_keywords:
+            if kw in dialogue:
+                score += 0.1
+                break
+        for kw in medium_keywords:
+            if kw in dialogue:
+                score += 0.05
+                break
+    
+    # 4. 时长调整（太短或太长的扣分）
+    if duration < 2:
+        score -= 0.1
+    elif duration > 60:
+        score -= 0.1
+    
+    # 确保在0-1范围内
+    return max(0, min(1, score))
+
+
 # 测试
 if __name__ == "__main__":
     print("智能重要性评分模块测试")
     print("使用方法: 在main_auto.py中调用 calculate_importance_scores()")
+    
+    # 测试 calculate_scene_importance
+    test_cases = [
+        ("你为什么要杀我？我不要死！", 10, "angry"),
+        ("好的，我知道了。", 5, "neutral"),
+        ("", 3, "neutral"),
+        ("这是一个关于爱与恨的真相", 15, "sad"),
+    ]
+    
+    print("\ncalculate_scene_importance 测试:")
+    for dialogue, duration, emotion in test_cases:
+        score = calculate_scene_importance(dialogue, duration, emotion)
+        print(f"  对话: '{dialogue[:20]}...' 时长:{duration}s 情感:{emotion} => 分数:{score:.2f}")
 
