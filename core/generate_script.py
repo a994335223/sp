@@ -19,26 +19,42 @@ import ollama
 def get_available_model():
     """
     自动检测并选择最佳可用模型
-    优先级: qwen3:30b > qwen3:8b > qwen2.5:7b > qwen2.5:3b
+    优先级: qwen3 > qwen2.5 > gemma3 > codellama
     """
     preferred_models = [
         'qwen3:30b',
         'qwen3:8b', 
         'qwen2.5:7b',
-        'qwen2.5:3b'
+        'qwen2.5:3b',
+        'qwen:7b',
+        'qwen:latest',
+        'gemma3:4b',   # Google的Gemma3也很适合文案生成
+        'gemma3:latest',
+        'codellama',   # 备选
     ]
     
     try:
         # 获取已安装的模型列表
-        models = ollama.list()
-        installed = [m['name'].split(':')[0] + ':' + m['name'].split(':')[1] if ':' in m['name'] else m['name'] 
-                     for m in models.get('models', [])]
+        response = ollama.list()
+        installed = []
+        
+        # 处理新版ollama返回格式
+        if hasattr(response, 'models'):
+            for m in response.models:
+                model_name = m.model if hasattr(m, 'model') else str(m)
+                installed.append(model_name)
+        elif isinstance(response, dict) and 'models' in response:
+            for m in response['models']:
+                model_name = m.get('name', m.get('model', str(m)))
+                installed.append(model_name)
+        
+        print(f"[AI] 已安装模型: {installed}")
         
         # 按优先级查找
         for model in preferred_models:
             for installed_model in installed:
-                if model in installed_model or installed_model.startswith(model.split(':')[0]):
-                    print(f"[AI] 检测到模型: {installed_model}")
+                if model in installed_model or model.split(':')[0] in installed_model:
+                    print(f"[AI] 选择模型: {installed_model}")
                     return installed_model
         
         # 如果没有找到首选模型，返回第一个qwen模型
@@ -46,11 +62,16 @@ def get_available_model():
             if 'qwen' in installed_model.lower():
                 print(f"[AI] 使用模型: {installed_model}")
                 return installed_model
+        
+        # 如果还是没有，返回任意可用模型
+        if installed:
+            print(f"[AI] 未找到qwen模型，使用: {installed[0]}")
+            return installed[0]
                 
     except Exception as e:
         print(f"[WARNING] 模型检测失败: {e}")
     
-    # 默认返回
+    # 默认返回（会尝试下载）
     return 'qwen3:30b'
 
 
