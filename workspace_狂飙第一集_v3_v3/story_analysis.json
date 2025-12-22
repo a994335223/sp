@@ -1,0 +1,262 @@
+{
+  "title": "狂飙",
+  "type": "unknown",
+  "genre": [],
+  "plot_summary": "",
+  "characters": [],
+  "key_scenes": [
+    {
+      "time": 314.17,
+      "duration": 10,
+      "description": "惊讶情感场景",
+      "dialogue": "从什么地方入手",
+      "importance": "high",
+      "reason": "情感强度: 0.60"
+    },
+    {
+      "time": 344.65,
+      "duration": 10,
+      "description": "惊讶情感场景",
+      "dialogue": "您有什么事吗",
+      "importance": "high",
+      "reason": "情感强度: 0.60"
+    },
+    {
+      "time": 353.1,
+      "duration": 10,
+      "description": "惊讶情感场景",
+      "dialogue": "什么指导组",
+      "importance": "high",
+      "reason": "情感强度: 0.60"
+    },
+    {
+      "time": 356.42,
+      "duration": 10,
+      "description": "惊讶情感场景",
+      "dialogue": "什么市委啊",
+      "importance": "high",
+      "reason": "情感强度: 0.60"
+    },
+    {
+      "time": 371.06,
+      "duration": 10,
+      "description": "惊讶情感场景",
+      "dialogue": "说是什么有公事找他",
+      "importance": "high",
+      "reason": "情感强度: 0.60"
+    },
+    {
+      "time": 429.32,
+      "duration": 10,
+      "description": "惊讶情感场景",
+      "dialogue": "什么时候啊",
+      "importance": "high",
+      "reason": "情感强度: 0.60"
+    },
+    {
+      "time": 504.46,
+      "duration": 10,
+      "description": "惊讶情感场景",
+      "dialogue": "知道组这次来是干什么",
+      "importance": "high",
+      "reason": "情感强度: 0.60"
+    },
+    {
+      "time": 625.42,
+      "duration": 10,
+      "description": "惊讶情感场景",
+      "dialogue": "打什么球",
+      "importance": "high",
+      "reason": "情感强度: 0.60"
+    },
+    {
+      "time": 712.02,
+      "duration": 10,
+      "description": "惊讶情感场景",
+      "dialogue": "说明什么",
+      "importance": "high",
+      "reason": "情感强度: 0.60"
+    },
+    {
+      "time": 906.86,
+      "duration": 10,
+      "description": "惊讶情感场景",
+      "dialogue": "这说明什么呀",
+      "importance": "high",
+      "reason": "情感强度: 0.60"
+    },
+    {
+      "time": 1448.29925,
+      "duration": 15,
+      "description": "冲突解决，真相揭示",
+      "dialogue": "",
+      "importance": "high",
+      "reason": "resolution阶段关键点"
+    }
+  ],
+  "story_structure": {
+    "opening": {
+      "time_range": [
+        0,
+        259.20300000000003
+      ],
+      "description": "人物出场，背景介绍",
+      "importance": "medium"
+    },
+    "development": {
+      "time_range": [
+        259.20300000000003,
+        254.17000000000002
+      ],
+      "description": "冲突展开，矛盾升级",
+      "importance": "high"
+    },
+    "climax": {
+      "time_range": [
+        254.17000000000002,
+        434.17
+      ],
+      "description": "高潮对决，矛盾爆发",
+      "importance": "critical"
+    },
+    "resolution": {
+      "time_range": [
+        434.17,
+        2462.4285
+      ],
+      "description": "冲突解决，真相揭示",
+      "importance": "high"
+    },
+    "ending": {
+      "time_range": [
+        2462.4285,
+        2592.03
+      ],
+      "description": "结局收尾",
+      "importance": "medium"
+    }
+  },
+  "classic_dialogues": [],
+  "emotional_beats": [
+    {
+      "time": 314.17,
+      "text": "从什么地方入手",
+      "emotion": "惊讶",
+      "intensity": 0.6000000000000001
+    },
+    {
+      "time": 344.65,
+      "text": "您有什么事吗",
+      "emotion": "惊讶",
+      "intensity": 0.6000000000000001
+    },
+    {
+      "time": 353.1,
+      "text": "什么指导组",
+      "emotion": "惊讶",
+      "intensity": 0.6000000000000001
+    },
+    {
+      "time": 356.42,
+      "text": "什么市委啊",
+      "emotion": "惊讶",
+      "intensity": 0.6000000000000001
+    },
+    {
+      "time": 371.06,
+      "text": "说是什么有公事找他",
+      "emotion": "惊讶",
+      "intensity": 0.6000000000000001
+    },
+    {
+      "time": 429.32,
+      "text": "什么时候啊",
+      "emotion": "惊讶",
+      "intensity": 0.6000000000000001
+    },
+    {
+      "time": 504.46,
+      "text": "知道组这次来是干什么",
+      "emotion": "惊讶",
+      "intensity": 0.6000000000000001
+    },
+    {
+      "time": 625.42,
+      "text": "打什么球",
+      "emotion": "惊讶",
+      "intensity": 0.6000000000000001
+    },
+    {
+      "time": 712.02,
+      "text": "说明什么",
+      "emotion": "惊讶",
+      "intensity": 0.6000000000000001
+    },
+    {
+      "time": 906.86,
+      "text": "这说明什么呀",
+      "emotion": "惊讶",
+      "intensity": 0.6000000000000001
+    },
+    {
+      "time": 973.48,
+      "text": "什么呀 刘伯",
+      "emotion": "惊讶",
+      "intensity": 0.6000000000000001
+    },
+    {
+      "time": 984.37,
+      "text": "你看这是什么",
+      "emotion": "惊讶",
+      "intensity": 0.6000000000000001
+    },
+    {
+      "time": 1162.55,
+      "text": "下回有什么事",
+      "emotion": "惊讶",
+      "intensity": 0.6000000000000001
+    },
+    {
+      "time": 1166.94,
+      "text": "什么情况啊 硕长",
+      "emotion": "惊讶",
+      "intensity": 0.6000000000000001
+    },
+    {
+      "time": 1172.19,
+      "text": "不会 我有什么心虚",
+      "emotion": "惊讶",
+      "intensity": 0.6000000000000001
+    },
+    {
+      "time": 1174.87,
+      "text": "你不明白为什么叫我来",
+      "emotion": "惊讶",
+      "intensity": 0.6000000000000001
+    },
+    {
+      "time": 1185.27,
+      "text": "那什么窃听设备",
+      "emotion": "惊讶",
+      "intensity": 0.6000000000000001
+    },
+    {
+      "time": 1204.7,
+      "text": "您知道我说什么",
+      "emotion": "惊讶",
+      "intensity": 0.6000000000000001
+    },
+    {
+      "time": 1205.58,
+      "text": "我说什么就好了",
+      "emotion": "惊讶",
+      "intensity": 0.6000000000000001
+    },
+    {
+      "time": 1246.98,
+      "text": "我这个什么情况",
+      "emotion": "惊讶",
+      "intensity": 0.6000000000000001
+    }
+  ]
+}

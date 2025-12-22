@@ -23,32 +23,48 @@ from typing import Dict, List, Optional
 
 def get_available_model() -> str:
     """获取可用的 Ollama 模型"""
-    preferred = ['qwen3:30b', 'qwen3:8b', 'qwen2.5:7b', 'gemma3:4b', 'codellama']
+    preferred = ['qwen3:30b', 'qwen3:8b', 'qwen2.5:7b', 'gemma3:4b', 'gemma2', 'llama3', 'codellama']
     
     try:
-        models = ollama.list()
+        models_response = ollama.list()
         available = []
         
-        if isinstance(models, dict) and 'models' in models:
-            available = [m.get('name', '').split(':')[0] + ':' + m.get('name', '').split(':')[-1] 
-                        for m in models['models']]
+        # 兼容不同版本的 ollama 返回格式
+        if isinstance(models_response, dict) and 'models' in models_response:
+            # 老版本格式: {'models': [{'name': 'qwen3:8b', ...}]}
+            for m in models_response['models']:
+                name = m.get('name', '') if isinstance(m, dict) else str(m)
+                if name:
+                    available.append(name)
+        elif hasattr(models_response, 'models'):
+            # 新版本格式: ListResponse 对象
+            for m in models_response.models:
+                name = getattr(m, 'name', '') or getattr(m, 'model', '')
+                if name:
+                    available.append(name)
         
         print(f"[AI] 已安装模型: {available}")
         
+        # 按优先级匹配
         for pref in preferred:
-            pref_base = pref.split(':')[0]
+            pref_base = pref.split(':')[0].lower()
             for avail in available:
-                if pref_base in avail:
+                avail_base = avail.split(':')[0].lower()
+                if pref_base == avail_base or pref_base in avail.lower():
                     print(f"[AI] 选择模型: {avail}")
                     return avail
         
+        # 返回第一个可用模型
         if available:
+            print(f"[AI] 使用第一个可用模型: {available[0]}")
             return available[0]
             
     except Exception as e:
         print(f"[WARNING] 模型检测失败: {e}")
     
-    return 'qwen2.5:7b'
+    # 默认返回，调用时会失败并触发 fallback
+    print("[WARNING] 未找到可用模型，将使用备用剧本")
+    return None
 
 
 class ScriptGenerator:
@@ -275,6 +291,11 @@ class ScriptGenerator:
 请直接开始创作：
 """
 
+        # 如果没有可用模型，直接使用备用剧本
+        if not self.model:
+            print("   [INFO] 无可用AI模型，使用备用剧本")
+            return self._generate_fallback_script(story, structure)
+
         try:
             print(f"   调用 {self.model} 生成剧本...")
             response = ollama.chat(
@@ -287,6 +308,11 @@ class ScriptGenerator:
             
             # 解析生成的剧本
             segments = self._parse_script(script_text, structure)
+            
+            # 如果解析失败，使用备用剧本
+            if not segments or len(segments) < 2:
+                print("   [WARNING] AI剧本解析结果不足，补充备用剧本")
+                return self._generate_fallback_script(story, structure)
             
             return segments
             

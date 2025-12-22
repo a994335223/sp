@@ -144,9 +144,10 @@ class VideoPipelineV3:
             # ========== Step 2: 语音识别 ==========
             report_progress(2, "正在识别视频对白...")
             
-            transcript, segments = transcribe_video(
+            subtitle_path = str(work_dir / "subtitles.srt")
+            segments, transcript = transcribe_video(
                 processed_video,
-                output_dir=str(work_dir)
+                output_srt=subtitle_path
             )
             print(f"   ✓ 识别到 {len(segments)} 段对白")
             
@@ -194,12 +195,40 @@ class VideoPipelineV3:
                 scenes=scenes
             )
             
-            # 创建时间线
-            from moviepy.editor import VideoFileClip
+            # 创建时间线 - 兼容 moviepy 1.x 和 2.x
+            try:
+                from moviepy import VideoFileClip
+            except ImportError:
+                from moviepy.editor import VideoFileClip
+            
             with VideoFileClip(processed_video) as video:
                 video_duration = video.duration
             
             timeline = self.smart_clipper.create_timeline(matched_segments, video_duration)
+            
+            # 如果时间线为空，创建默认时间线
+            if not timeline:
+                print("   [WARNING] 时间线为空，创建默认片段")
+                # 默认取视频的几个关键位置
+                default_positions = [
+                    (video_duration * 0.05, video_duration * 0.1),   # 开头
+                    (video_duration * 0.25, video_duration * 0.35),  # 前半
+                    (video_duration * 0.5, video_duration * 0.6),    # 中间
+                    (video_duration * 0.7, video_duration * 0.8),    # 高潮
+                    (video_duration * 0.9, video_duration * 0.95),   # 结尾
+                ]
+                for i, (start, end) in enumerate(default_positions):
+                    timeline.append({
+                        'clip_id': i + 1,
+                        'segment_id': i + 1,
+                        'phase': f'段落{i+1}',
+                        'source_start': start,
+                        'source_end': end,
+                        'narration_start': 0,
+                        'narration_end': end - start,
+                        'keep_original': False,
+                    })
+            
             self.smart_clipper.print_timeline(timeline)
             
             # ========== Step 6: 智能剪辑 ==========
@@ -220,9 +249,14 @@ class VideoPipelineV3:
             clip_files = extract_clips(processed_video, clips_to_extract, str(clips_dir))
             print(f"   ✓ 提取了 {len(clip_files)} 个片段")
             
-            # 拼接
-            concat_path = str(work_dir / "剪辑后.mp4")
-            concat_clips(clip_files, concat_path)
+            # 如果没有提取到片段，使用原视频
+            if not clip_files:
+                print("   [WARNING] 未提取到片段，使用原视频")
+                concat_path = processed_video
+            else:
+                # 拼接
+                concat_path = str(work_dir / "剪辑后.mp4")
+                concat_clips(clip_files, concat_path)
             
             # ========== Step 7: 语音合成 ==========
             report_progress(7, "正在生成解说配音...")

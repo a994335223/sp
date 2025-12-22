@@ -128,6 +128,18 @@ class SemanticMatcher:
             
             # 合并和去重
             final_clips = self._merge_clips(matched_clips, seg.get('duration', 30))
+            
+            # 如果没有匹配到任何片段，使用建议的时间范围
+            if not final_clips:
+                default_duration = min(seg.get('duration', 30), end_time - start_time)
+                final_clips = [{
+                    'start': start_time,
+                    'end': start_time + default_duration,
+                    'score': 0.5,
+                    'method': 'fallback'
+                }]
+                print(f"   [FALLBACK] 使用默认时间范围 {start_time:.1f}s - {start_time + default_duration:.1f}s")
+            
             seg['matched_clips'] = final_clips
             
             print(f"   ✓ 最终选取 {len(final_clips)} 个片段")
