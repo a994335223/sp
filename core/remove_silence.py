@@ -15,10 +15,8 @@ import os
 def remove_silence(
     input_path: str, 
     output_path: str,
-    margin: str = "0.1sec",      # 保留边缘
-    min_clip: float = 0.3,       # 最小片段长度
-    min_cut: float = 0.2,        # 最小剪切长度
-    silent_threshold: float = 0.04  # 静音阈值
+    margin: str = "0.2s",        # 保留边缘（新版参数格式）
+    silent_speed: int = 99999    # 静音片段速度（相当于删除）
 ):
     """
     自动去除视频中的静音片段
@@ -27,26 +25,23 @@ def remove_silence(
         input_path: 输入视频
         output_path: 输出视频
         margin: 保留的边缘时间
-        min_clip: 最小保留片段
-        min_cut: 最小剪切片段
-        silent_threshold: 静音阈值（0-1）
+        silent_speed: 静音片段的播放速度（99999表示删除）
     
     返回:
         output_path: 输出文件路径
     """
-    print(f"🔇 开始去除静音片段: {input_path}")
+    print(f"[AUDIO] 开始去除静音片段: {input_path}")
     
     # 确保输出目录存在
     output_dir = os.path.dirname(output_path)
     if output_dir:
         os.makedirs(output_dir, exist_ok=True)
     
+    # auto-editor 新版本命令格式
     cmd = [
         'auto-editor', input_path,
         '--margin', margin,
-        '--min-clip-length', str(min_clip),
-        '--min-cut-length', str(min_cut),
-        '--silent-threshold', str(silent_threshold),
+        '--silent-speed', str(silent_speed),
         '--no-open',  # 不自动打开
         '-o', output_path
     ]
@@ -58,12 +53,20 @@ def remove_silence(
         if os.path.exists(input_path) and os.path.exists(output_path):
             original_size = os.path.getsize(input_path)
             new_size = os.path.getsize(output_path)
-            ratio = (1 - new_size / original_size) * 100
-            print(f"[OK] 静音剪除完成，视频缩短了约 {ratio:.1f}%")
+            if original_size > 0:
+                ratio = (1 - new_size / original_size) * 100
+                print(f"[OK] 静音剪除完成，视频缩短了约 {ratio:.1f}%")
+            else:
+                print(f"[OK] 静音剪除完成")
         else:
             print(f"[OK] 静音剪除完成")
     else:
-        print(f"[ERROR] 错误: {result.stderr}")
+        error_msg = result.stderr if result.stderr else result.stdout
+        print(f"[WARNING] 静音剪除失败: {error_msg[:200] if error_msg else 'unknown'}")
+        # 失败时复制原文件
+        import shutil
+        shutil.copy(input_path, output_path)
+        print(f"[INFO] 已复制原视频作为输出")
     
     return output_path
 
