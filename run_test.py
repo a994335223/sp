@@ -39,7 +39,7 @@ async def main():
     input_video = r'C:\Users\Administrator\Downloads\狂飙E01.mp4'
     movie_name = '狂飙'
     output_name = '狂飙第一集解说_v2'  # 新版本输出
-    style = '专业解说'  # 改为专业解说风格
+    style = '幽默'  # 幽默轻松风格（不是吐槽）
     target_duration = 600
     # ==================================
     

@@ -95,7 +95,7 @@ async def full_auto_process(
     input_video: str,
     movie_name: str = None,
     output_name: str = "抖音解说",
-    style: str = "幽默吐槽",
+    style: str = "幽默",  # 默认幽默风格（轻松有趣，不刻意吐槽）
     use_internet: bool = True,
     target_duration: int = 240,
     progress_callback: Optional[Callable[[int, int, str, str], None]] = None,
@@ -412,7 +412,7 @@ if __name__ == "__main__":
             test_video,
             movie_name=movie_name,
             output_name="全自动解说",
-            style="幽默吐槽",
+            style="幽默",
             use_internet=True if movie_name else False
         ))
     else:

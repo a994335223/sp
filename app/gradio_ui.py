@@ -204,8 +204,8 @@ def create_demo():
                 
                 style = gr.Dropdown(
                     label="解说风格",
-                    choices=["幽默吐槽", "正经解说", "悬疑紧张", "温情感人"],
-                    value="幽默吐槽"
+                    choices=["幽默", "专业解说", "悬疑紧张", "温情感人"],
+                    value="幽默"
                 )
                 
                 target_duration = gr.Slider(

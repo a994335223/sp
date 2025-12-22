@@ -36,7 +36,7 @@ from compose_video import compose_final_video, convert_to_douyin
 async def process_movie(
     input_video: str,
     output_name: str = "抖音解说",
-    style: str = "幽默吐槽"
+    style: str = "幽默"
 ):
     """
     处理2小时电影，生成抖音解说视频（简化版）
@@ -162,7 +162,7 @@ if __name__ == "__main__":
         asyncio.run(process_movie(
             test_video,
             output_name="解说视频",
-            style="幽默吐槽"
+            style="幽默"
         ))
     else:
         print(f"⚠️ 视频文件不存在: {test_video}")
