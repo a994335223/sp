@@ -40,10 +40,17 @@ class StoryUnderstanding:
         self,
         movie_name: str,
         transcript_segments: List[Dict],
-        full_transcript: str
+        full_transcript: str,
+        external_plot_info: Dict = None
     ) -> Dict:
         """
         全面理解一部电影/剧集
+        
+        参数：
+            movie_name: 作品名称
+            transcript_segments: 字幕片段
+            full_transcript: 完整字幕文本
+            external_plot_info: 外部获取的剧情信息（来自TMDB/AI总结）
         
         返回：
         {
@@ -89,16 +96,42 @@ class StoryUnderstanding:
             'emotional_beats': []
         }
         
-        # 1. 联网获取剧情信息
-        print("\n[1/4] 联网搜索剧情信息...")
-        web_info = self._search_plot_info(movie_name)
-        if web_info:
-            result['plot_summary'] = web_info.get('plot', '')
-            result['characters'] = web_info.get('characters', [])
-            result['genre'] = web_info.get('genre', [])
-            result['type'] = web_info.get('type', 'movie')
+        # 1. 使用外部传入的剧情信息（优先）或联网搜索
+        print("\n[1/4] 获取剧情信息...")
+        
+        if external_plot_info and external_plot_info.get('overview'):
+            # 使用外部传入的信息
+            result['plot_summary'] = external_plot_info.get('overview', '')
+            # 合并分集剧情
+            if external_plot_info.get('episode_overview'):
+                result['plot_summary'] += '\n\n本集剧情：' + external_plot_info['episode_overview']
+            
+            # 解析演员信息
+            for actor in external_plot_info.get('cast', []):
+                result['characters'].append({
+                    'name': actor.get('character') or actor.get('name', ''),
+                    'role': '主演',
+                    'description': f"由{actor.get('name', '')}饰演"
+                })
+            
+            result['genre'] = external_plot_info.get('genres', [])
+            result['type'] = external_plot_info.get('type', 'movie')
+            
             print(f"   ✓ 获取到 {len(result['plot_summary'])} 字剧情简介")
             print(f"   ✓ 识别到 {len(result['characters'])} 个主要人物")
+            print(f"   ✓ 数据来源: {external_plot_info.get('source', 'unknown')}")
+        else:
+            # 回退到原有的联网搜索
+            web_info = self._search_plot_info(movie_name)
+            if web_info:
+                result['plot_summary'] = web_info.get('plot', '')
+                result['characters'] = web_info.get('characters', [])
+                result['genre'] = web_info.get('genre', [])
+                result['type'] = web_info.get('type', 'movie')
+                print(f"   ✓ 获取到 {len(result['plot_summary'])} 字剧情简介")
+                print(f"   ✓ 识别到 {len(result['characters'])} 个主要人物")
+            else:
+                print("   [INFO] 未获取到外部剧情信息")
         
         # 2. 分析字幕内容
         print("\n[2/4] 分析字幕内容...")

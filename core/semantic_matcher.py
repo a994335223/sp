@@ -394,10 +394,18 @@ class SmartClipper:
     def create_timeline(
         self,
         script_segments: List[Dict],
-        video_duration: float
+        video_duration: float,
+        target_output_duration: float = None
     ) -> List[Dict]:
         """
         创建剪辑时间线
+        
+        核心逻辑：确保视频素材时长 >= 解说时长
+        
+        参数：
+            script_segments: 解说剧本段落
+            video_duration: 源视频总时长
+            target_output_duration: 目标输出时长（如果指定，会确保素材足够）
         
         返回：
         [
@@ -416,18 +424,65 @@ class SmartClipper:
         narration_cursor = 0.0
         clip_id = 0
         
+        # 计算总解说时长
+        total_narration_duration = sum(seg.get('duration', 30) for seg in script_segments)
+        if target_output_duration:
+            total_narration_duration = max(total_narration_duration, target_output_duration)
+        
+        print(f"\n[时间线] 目标解说时长: {total_narration_duration:.0f}秒")
+        print(f"[时间线] 源视频时长: {video_duration:.0f}秒")
+        
         for seg in script_segments:
             matched_clips = seg.get('matched_clips', [])
             narration_duration = seg.get('duration', 30)
             keep_original = seg.get('keep_original_audio', False)
+            time_range = seg.get('source_time_range', [0, video_duration])
             
-            if not matched_clips:
-                # 使用建议的时间范围
-                time_range = seg.get('source_time_range', [0, 30])
-                matched_clips = [{
-                    'start': time_range[0],
-                    'end': min(time_range[0] + narration_duration, time_range[1])
-                }]
+            # 计算当前匹配素材的总时长
+            matched_duration = sum(c['end'] - c['start'] for c in matched_clips)
+            
+            # 如果素材不够，需要补充
+            if matched_duration < narration_duration:
+                needed_duration = narration_duration - matched_duration
+                print(f"   [{seg.get('phase', '未知')}] 素材不足，需补充 {needed_duration:.0f}秒")
+                
+                # 从时间范围内补充素材
+                range_start, range_end = time_range
+                range_duration = range_end - range_start
+                
+                if range_duration >= needed_duration:
+                    # 在范围内均匀选取素材
+                    if not matched_clips:
+                        # 没有匹配到任何素材，使用整个时间范围
+                        matched_clips = [{
+                            'start': range_start,
+                            'end': min(range_start + narration_duration, range_end),
+                            'score': 0.5,
+                            'method': 'range_fill'
+                        }]
+                    else:
+                        # 已有素材，补充剩余部分
+                        last_end = max(c['end'] for c in matched_clips)
+                        if last_end + needed_duration <= range_end:
+                            matched_clips.append({
+                                'start': last_end,
+                                'end': last_end + needed_duration,
+                                'score': 0.3,
+                                'method': 'supplement'
+                            })
+                        else:
+                            # 从范围开始补充
+                            first_start = min(c['start'] for c in matched_clips)
+                            if first_start >= range_start + needed_duration:
+                                matched_clips.insert(0, {
+                                    'start': range_start,
+                                    'end': range_start + needed_duration,
+                                    'score': 0.3,
+                                    'method': 'supplement'
+                                })
+            
+            # 按时间排序
+            matched_clips.sort(key=lambda x: x['start'])
             
             # 将素材分配到时间线
             for clip in matched_clips:

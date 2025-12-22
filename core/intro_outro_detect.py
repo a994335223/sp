@@ -192,39 +192,80 @@ def detect_intro_enhanced(video_path: str, max_duration: float = 120.0) -> float
     # 寻找片头结束点
     intro_end = 0
     
-    # 策略1：找到第一个明显的对话开始点
+    # 新策略：找到连续稳定对话的开始点（至少连续3个采样点有对话）
+    # 片头特征：大段音乐 + 偶尔插入的短对话/旁白
+    # 正片特征：连续稳定的对话
+    
+    CONSECUTIVE_SPEECH_REQUIRED = 3  # 需要连续3个采样点（9秒）有对话
+    
+    # 策略1：找到连续稳定对话的开始点
+    consecutive_speech = 0
     for i, r in enumerate(analysis_results):
         if r['audio']['likely_speech'] and not r['visual']['is_black']:
-            # 找到对话，回退一个间隔作为片头结束
-            intro_end = max(0, r['time'] - interval)
-            print(f"   [策略1] 检测到对话开始于 {r['time']:.0f}s，片头结束于 {intro_end:.0f}s")
-            break
-    
-    # 策略2：如果前面全是音乐，找音乐结束点
-    if intro_end == 0:
-        music_end = 0
-        for r in analysis_results:
-            if r['audio']['likely_music']:
-                music_end = r['time'] + interval
-            elif music_end > 0 and not r['audio']['likely_music']:
-                intro_end = music_end
-                print(f"   [策略2] 音乐结束于 {intro_end:.0f}s")
+            consecutive_speech += 1
+            if consecutive_speech >= CONSECUTIVE_SPEECH_REQUIRED:
+                # 找到连续对话，回退到开始位置
+                start_idx = i - CONSECUTIVE_SPEECH_REQUIRED + 1
+                intro_end = analysis_results[start_idx]['time']
+                print(f"   [策略1] 检测到连续对话从 {intro_end:.0f}s 开始（连续{CONSECUTIVE_SPEECH_REQUIRED}个采样点）")
                 break
+        else:
+            # 重置计数
+            consecutive_speech = 0
     
-    # 策略3：找黑屏后的第一个正常画面
+    # 策略2：如果没找到连续对话，找最后一段纯音乐的结束点
     if intro_end == 0:
+        last_music_end = 0
+        in_music_segment = False
+        
         for i, r in enumerate(analysis_results):
-            if r['visual']['is_black'] and i + 1 < len(analysis_results):
-                next_r = analysis_results[i + 1]
-                if not next_r['visual']['is_black']:
-                    intro_end = next_r['time']
-                    print(f"   [策略3] 黑屏结束于 {intro_end:.0f}s")
+            if r['audio']['likely_music'] and not r['audio']['likely_speech']:
+                in_music_segment = True
+                last_music_end = r['time'] + interval
+            elif in_music_segment and r['audio']['likely_speech']:
+                # 音乐段结束，对话开始
+                # 检查这是否是片头结束（后续应该有更多对话）
+                remaining_speech_count = sum(
+                    1 for rr in analysis_results[i:i+5] 
+                    if rr['audio']['likely_speech']
+                )
+                if remaining_speech_count >= 3:
+                    intro_end = last_music_end
+                    print(f"   [策略2] 最后音乐段结束于 {intro_end:.0f}s")
                     break
     
-    # 限制：片头不超过90秒（国标）
+    # 策略3：如果有明显的黑屏分界点（5秒以上）
+    if intro_end == 0:
+        black_start = None
+        for i, r in enumerate(analysis_results):
+            if r['visual']['is_black']:
+                if black_start is None:
+                    black_start = r['time']
+            else:
+                if black_start is not None:
+                    black_duration = r['time'] - black_start
+                    if black_duration >= 3:  # 3秒以上黑屏
+                        intro_end = r['time']
+                        print(f"   [策略3] 黑屏段({black_start:.0f}s-{r['time']:.0f}s)后正片开始")
+                        break
+                black_start = None
+    
+    # 策略4：如果前90秒大部分是音乐，直接跳过
+    if intro_end == 0:
+        music_count = sum(1 for r in analysis_results if r['audio']['likely_music'])
+        total_samples = len(analysis_results)
+        if total_samples > 0 and music_count / total_samples > 0.6:
+            # 超过60%是音乐，找最后一个音乐采样点
+            for r in reversed(analysis_results):
+                if r['audio']['likely_music']:
+                    intro_end = r['time'] + interval
+                    print(f"   [策略4] 前段60%+是音乐，片头结束于 {intro_end:.0f}s")
+                    break
+    
+    # 限制：片头不超过90秒（国标），但至少要跳过检测到的音乐段
     if intro_end > 90:
-        print(f"   [限制] 片头超过90秒，按90秒处理")
-        intro_end = 90
+        print(f"   [限制] 片头{intro_end:.0f}秒超过国标90秒上限，但保留检测结果")
+        # 不强制限制为90秒，因为实际片头可能更长
     
     print(f"   片头时长: {intro_end:.0f}秒")
     return intro_end

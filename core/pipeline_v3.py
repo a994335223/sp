@@ -46,6 +46,7 @@ from tts_synthesis import TTSEngine
 from smart_cut import extract_clips, concat_clips, VIDEO_ENCODER
 from compose_video import compose_final_video, add_subtitles, convert_to_douyin
 from remove_silence import remove_silence
+from plot_fetcher import PlotFetcher, get_plot_info, summarize_plot_from_transcript, parse_episode_from_filename
 
 
 # 处理步骤
@@ -138,8 +139,20 @@ class VideoPipelineV3:
             # ========== Step 1: 联网搜索（前置！）==========
             report_progress(1, f"正在搜索《{movie_name or '未知'}》的信息...")
             
-            # 这里会在 story_understanding 中完成联网搜索
-            # 暂时保存movie_name，后面使用
+            # 使用新的 PlotFetcher 获取剧情
+            season, episode = parse_episode_from_filename(input_video)
+            plot_info = get_plot_info(
+                video_path=input_video,
+                title=movie_name,
+                api_key=os.environ.get("TMDB_API_KEY", "")
+            )
+            
+            if plot_info.get('overview'):
+                print(f"   ✓ 获取到 {len(plot_info['overview'])} 字剧情简介")
+                if plot_info.get('cast'):
+                    print(f"   ✓ 识别到 {len(plot_info['cast'])} 个主要演员")
+            else:
+                print("   [INFO] 外部API未获取到信息，将使用AI分析字幕")
             
             # ========== Step 2: 语音识别 ==========
             report_progress(2, "正在识别视频对白...")
@@ -151,13 +164,23 @@ class VideoPipelineV3:
             )
             print(f"   ✓ 识别到 {len(segments)} 段对白")
             
+            # 如果API没有获取到剧情，用AI分析字幕生成
+            if not plot_info.get('overview') and transcript:
+                print("   [AI] 使用字幕内容生成剧情总结...")
+                ai_summary = summarize_plot_from_transcript(transcript, segments)
+                if ai_summary:
+                    plot_info['overview'] = ai_summary
+                    plot_info['source'] = 'ai'
+            
             # ========== Step 3: 剧情理解 ==========
             report_progress(3, "正在深度分析剧情...")
             
+            # 传递外部获取的剧情信息
             story_understanding = self.story_engine.understand(
                 movie_name=movie_name or "未知作品",
                 transcript_segments=segments,
-                full_transcript=transcript
+                full_transcript=transcript,
+                external_plot_info=plot_info  # 新增参数
             )
             
             # 保存剧情理解结果
@@ -204,7 +227,11 @@ class VideoPipelineV3:
             with VideoFileClip(processed_video) as video:
                 video_duration = video.duration
             
-            timeline = self.smart_clipper.create_timeline(matched_segments, video_duration)
+            timeline = self.smart_clipper.create_timeline(
+                matched_segments, 
+                video_duration,
+                target_output_duration=target_duration  # 传入目标时长
+            )
             
             # 如果时间线为空，创建默认时间线
             if not timeline:

@@ -247,11 +247,29 @@ class ScriptGenerator:
         dialogue_samples = '\n'.join([f"「{d['text']}」" 
                                       for d in classic_dialogues[:5]])
         
+        # 计算每段时长（根据目标时长动态分配）
+        # 10分钟视频 = 600秒 ≈ 3000字解说（每秒5字）
+        target_chars = target_duration * 4  # 每秒约4个汉字
+        
+        # 段落时长分配比例
+        segment_ratios = {
+            '开场白': 0.05,      # 5%
+            '背景介绍': 0.10,    # 10%
+            '故事展开1': 0.20,   # 20%
+            '故事展开2': 0.20,   # 20%
+            '高潮': 0.25,        # 25%
+            '结局': 0.15,        # 15%
+            '收尾': 0.05,        # 5%
+        }
+        
+        segment_times = {k: int(target_duration * v) for k, v in segment_ratios.items()}
+        segment_chars = {k: int(target_chars * v) for k, v in segment_ratios.items()}
+        
         # 构建prompt
         style_guide = self._get_style_guide(style)
         
-        prompt = f"""你是一位顶级影视解说博主，风格类似"谷阿莫"、"木鱼水心"。
-现在需要为《{title}》创作一个{target_duration}秒的解说视频剧本。
+        prompt = f"""你是一位顶级影视解说博主，风格类似"谷阿莫"、"木鱼水心"、"刘哔电影"。
+现在需要为《{title}》创作一个{target_duration}秒（约{target_chars}字）的解说视频剧本。
 
 ## 作品信息
 {plot}
@@ -265,30 +283,52 @@ class ScriptGenerator:
 ## 解说风格要求
 {style_guide}
 
-## 剧本结构要求
-请按以下结构创作，每段用【段落名】标记，并注明这段应该配什么画面：
+## 剧本结构（严格按字数要求）
+请按以下结构创作，必须达到每段的字数要求：
 
-1. 【开场白】（约20秒）- 用一个吸引人的问题或悬念开场
-2. 【背景介绍】（约30秒）- 简单介绍背景和人物
-3. 【故事展开1】（约60秒）- 讲述第一个重要情节
-4. 【故事展开2】（约60秒）- 冲突升级
-5. 【高潮】（约60秒）- 最精彩的部分，注明【保留原声】的地方
-6. 【结局】（约45秒）- 真相和结局
-7. 【收尾】（约15秒）- 简短评价，引导点赞关注
+1. 【开场白】（{segment_chars['开场白']}字，{segment_times['开场白']}秒）
+   - 用一个吸引人的问题或悬念开场
+   - 可以用"大家好"或直接进入主题
+   
+2. 【背景介绍】（{segment_chars['背景介绍']}字，{segment_times['背景介绍']}秒）
+   - 介绍故事背景、时代、地点
+   - 介绍主要人物及其关系
+   
+3. 【故事展开1】（{segment_chars['故事展开1']}字，{segment_times['故事展开1']}秒）
+   - 第一个重要情节
+   - 人物命运的转折点
+   
+4. 【故事展开2】（{segment_chars['故事展开2']}字，{segment_times['故事展开2']}秒）
+   - 冲突升级
+   - 矛盾激化
+   
+5. 【高潮】（{segment_chars['高潮']}字，{segment_times['高潮']}秒）
+   - 最精彩的部分
+   - 关键对决或真相揭示
+   - 标注【保留原声】的精彩片段
+   
+6. 【结局】（{segment_chars['结局']}字，{segment_times['结局']}秒）
+   - 故事结局
+   - 人物命运
+   
+7. 【收尾】（{segment_chars['收尾']}字，{segment_times['收尾']}秒）
+   - 简短评价
+   - 引导点赞关注
 
-## 格式要求
-每段格式如下：
+## 格式要求（严格遵守）
+每段必须按此格式：
 【段落名】
-[画面：描述这段应该配什么画面]
-解说文本...
-（如果某处应保留原声，写：【保留原声：描述场景】）
+[画面：用一句话描述应该配什么画面]
+（直接写解说正文，不要写"解说文本"这几个字）
 
-## 禁止内容
-- 不要出现"吐槽"、"笑"、"评分多少分"等字眼
-- 不要有任何评分数字
-- 不要说"接下来让我们看看"这种生硬过渡
+## 重要提醒
+- 总字数必须达到{target_chars}字左右
+- 每段必须达到规定字数，不能太短
+- 直接输出解说内容，不要写"解说文本..."
+- 不要有"吐槽"、评分数字
+- 用自然流畅的语言，像和朋友聊天一样
 
-请直接开始创作：
+请开始创作完整剧本：
 """
 
         # 如果没有可用模型，直接使用备用剧本
@@ -297,17 +337,34 @@ class ScriptGenerator:
             return self._generate_fallback_script(story, structure)
 
         try:
-            print(f"   调用 {self.model} 生成剧本...")
+            print(f"   调用 {self.model} 生成剧本（目标{target_chars}字）...")
+            
+            # 增加输出长度
             response = ollama.chat(
                 model=self.model,
                 messages=[{'role': 'user', 'content': prompt}],
-                options={'temperature': 0.7, 'num_predict': 2000}
+                options={
+                    'temperature': 0.7, 
+                    'num_predict': 8000,  # 增加到8000 tokens
+                    'num_ctx': 8192,      # 增加上下文窗口
+                }
             )
             
             script_text = response['message']['content']
             
+            # 后处理：清理模板残留文字
+            script_text = self._clean_script_text(script_text)
+            
+            print(f"   ✓ AI生成完成，共{len(script_text)}字")
+            
             # 解析生成的剧本
             segments = self._parse_script(script_text, structure)
+            
+            # 检查总字数是否足够
+            total_chars = sum(len(s.get('narration_text', '')) for s in segments)
+            if total_chars < target_chars * 0.5:
+                print(f"   [WARNING] 生成字数不足（{total_chars}/{target_chars}），尝试补充生成")
+                # 可以在这里添加补充生成逻辑
             
             # 如果解析失败，使用备用剧本
             if not segments or len(segments) < 2:
@@ -351,6 +408,29 @@ class ScriptGenerator:
 """
         }
         return guides.get(style, guides['幽默'])
+    
+    def _clean_script_text(self, script_text: str) -> str:
+        """清理剧本中的模板残留和格式问题"""
+        import re
+        
+        # 清理"解说文本..."等模板占位符
+        script_text = re.sub(r'解说文本[\.。…]*', '', script_text)
+        script_text = re.sub(r'解说正文[\.。…]*', '', script_text)
+        script_text = re.sub(r'正文内容[\.。…]*', '', script_text)
+        script_text = re.sub(r'\(直接写解说正文.*?\)', '', script_text)
+        script_text = re.sub(r'（直接写解说正文.*?）', '', script_text)
+        
+        # 清理多余的空行
+        script_text = re.sub(r'\n{3,}', '\n\n', script_text)
+        
+        # 清理AI可能输出的元信息
+        script_text = re.sub(r'\*\*注意.*?\*\*', '', script_text)
+        script_text = re.sub(r'---+', '', script_text)
+        
+        # 清理可能的markdown标记
+        script_text = re.sub(r'\*\*(.*?)\*\*', r'\1', script_text)
+        
+        return script_text.strip()
     
     def _parse_script(self, script_text: str, structure: List[Dict]) -> List[Dict]:
         """解析AI生成的剧本"""
