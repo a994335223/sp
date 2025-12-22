@@ -13,6 +13,7 @@ from .auto_polish import apply_cinematic_filter
 from .movie_info import MovieInfoFetcher
 from .auto_detect_highlights import auto_detect_keep_original
 from .cover_generator import auto_generate_cover
+from .intro_outro_detect import detect_intro_outro, trim_video, auto_trim_intro_outro
 
 __all__ = [
     'detect_scenes',
@@ -33,5 +34,8 @@ __all__ = [
     'MovieInfoFetcher',
     'auto_detect_keep_original',
     'auto_generate_cover',
+    'detect_intro_outro',
+    'trim_video',
+    'auto_trim_intro_outro',
 ]
 

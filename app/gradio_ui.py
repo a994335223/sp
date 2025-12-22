@@ -30,7 +30,10 @@ sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(PROJECT_ROOT / "core"))
 
 # 导入主处理函数
-from .main_auto import full_auto_process, PROCESS_STEPS, TOTAL_STEPS
+try:
+    from .main_auto import full_auto_process, PROCESS_STEPS, TOTAL_STEPS
+except ImportError:
+    from main_auto import full_auto_process, PROCESS_STEPS, TOTAL_STEPS
 
 
 class ProgressTracker:
@@ -75,14 +78,14 @@ class ProgressTracker:
     def _get_steps_status(self) -> str:
         """获取所有步骤状态"""
         lines = []
-        for i, (step_num, name, desc) in enumerate(PROCESS_STEPS, 1):
-            if i < self.current_step:
+        for step_num, name, desc in PROCESS_STEPS:
+            if step_num < self.current_step:
                 status = "[OK]"
-            elif i == self.current_step:
+            elif step_num == self.current_step:
                 status = "[>>]"  # 当前步骤
             else:
                 status = "[  ]"
-            lines.append(f"  {status} Step {i}: {name}")
+            lines.append(f"  {status} Step {step_num}: {name}")
         return "\n".join(lines)
 
 

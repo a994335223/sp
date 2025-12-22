@@ -31,7 +31,7 @@ def compose_final_video(
     output_path: str,
     keep_original_segments: list = None,
     subtitle_path: str = None,
-    mode: str = "mix"
+    mode: str = "replace"  # [FIX] 默认改为replace，确保解说为主
 ):
     """
     合成最终视频
@@ -40,11 +40,14 @@ def compose_final_video(
         video_path: 剪辑后的视频
         narration_path: 解说音频
         output_path: 输出路径
-        keep_original_segments: 需要保留原声的时间段
+        keep_original_segments: 需要保留原声的时间段（仅mix模式有效）
         subtitle_path: 字幕文件（可选）
-        mode: "mix"=混合, "replace"=完全替换
+        mode: 
+            - "replace": 完全替换原声为解说（推荐，确保解说清晰）
+            - "mix": 混合模式，解说音量100%，原声降到10%作为背景
     """
     print("[VIDEO] 开始合成最终视频...")
+    print(f"   合成模式: {mode}")
     
     # 确保输出目录存在
     output_dir = os.path.dirname(output_path)
@@ -66,34 +69,45 @@ def compose_final_video(
     # 检测 MoviePy 版本并选择正确的方法
     has_with_audio = hasattr(video, 'with_audio')
     
+    # 获取视频和解说时长
+    video_duration = video.duration
+    narration_duration = narration.duration
+    print(f"   视频时长: {video_duration:.1f}秒")
+    print(f"   解说时长: {narration_duration:.1f}秒")
+    
     try:
         if mode == "replace":
-            # 完全替换原声
+            # [推荐] 完全替换原声为解说
+            print("   使用纯解说模式...")
             if has_with_audio:
                 final_video = video.with_audio(narration)
             else:
                 final_video = video.set_audio(narration)
         
         elif mode == "mix":
-            # 智能混合
+            # 混合模式：解说为主，原声为辅
             original_audio = video.audio
             
             if original_audio is None:
                 # 视频没有音轨，直接使用解说
+                print("   视频无音轨，使用纯解说...")
                 if has_with_audio:
                     final_video = video.with_audio(narration)
                 else:
                     final_video = video.set_audio(narration)
             else:
-                # 简化版混合：降低原声音量，叠加解说
+                # [FIX] 改进混合逻辑：解说100%，原声降到10%作为背景
+                print("   混合模式：解说100% + 原声10%背景...")
                 try:
                     # MoviePy 2.x 方式
                     if hasattr(original_audio, 'with_volume_scaled'):
-                        original_low = original_audio.with_volume_scaled(0.2)
+                        original_low = original_audio.with_volume_scaled(0.1)  # 原声降到10%
                     else:
-                        original_low = original_audio.volumex(0.2)
+                        original_low = original_audio.volumex(0.1)  # 原声降到10%
                     
-                    mixed = CompositeAudioClip([original_low, narration])
+                    # 确保解说音量正常（100%）
+                    # 解说在前（优先级更高）
+                    mixed = CompositeAudioClip([narration, original_low])
                     
                     if has_with_audio:
                         final_video = video.with_audio(mixed)
@@ -101,14 +115,15 @@ def compose_final_video(
                         final_video = video.set_audio(mixed)
                         
                 except Exception as e:
-                    print(f"   [WARNING] 音频混合失败: {e}，使用纯解说")
+                    print(f"   [WARNING] 音频混合失败: {e}，切换到纯解说模式")
                     if has_with_audio:
                         final_video = video.with_audio(narration)
                     else:
                         final_video = video.set_audio(narration)
         
         else:
-            # 默认替换
+            # 未知模式，默认替换
+            print(f"   [WARNING] 未知模式'{mode}'，使用纯解说...")
             if has_with_audio:
                 final_video = video.with_audio(narration)
             else:

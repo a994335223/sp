@@ -43,10 +43,12 @@ from smart_cut import extract_clips, concat_clips, select_best_clips
 from tts_synthesis import TTSEngine
 from compose_video import compose_final_video, convert_to_douyin
 from movie_info import MovieInfoFetcher
+from intro_outro_detect import auto_trim_intro_outro  # 新增：片头片尾检测
 
 
-# 处理步骤定义
+# 处理步骤定义（新增Step 0）
 PROCESS_STEPS = [
+    (0, "预处理", "检测并去除片头片尾"),
     (1, "镜头切分", "使用 PySceneDetect 分析视频镜头"),
     (2, "语音识别", "使用 faster-whisper 识别对白"),
     (3, "画面分析", "使用 CLIP 分析画面内容"),
@@ -71,6 +73,23 @@ def verify_file_exists(file_path: str, description: str = "文件"):
     return True
 
 
+def check_ai_script_valid(script: str) -> bool:
+    """检查AI生成的文案是否有效（非模板/非失败）"""
+    if not script or len(script) < 100:
+        return False
+    # 检查是否是失败模板
+    fail_markers = [
+        "自动生成失败",
+        "请手动编辑",
+        "AI服务不可用",
+        "Ollama调用失败"
+    ]
+    for marker in fail_markers:
+        if marker in script:
+            return False
+    return True
+
+
 async def full_auto_process(
     input_video: str,
     movie_name: str = None,
@@ -78,7 +97,8 @@ async def full_auto_process(
     style: str = "幽默吐槽",
     use_internet: bool = True,
     target_duration: int = 240,
-    progress_callback: Optional[Callable[[int, int, str, str], None]] = None
+    progress_callback: Optional[Callable[[int, int, str, str], None]] = None,
+    skip_intro_outro: bool = False  # 新增：是否跳过片头片尾检测
 ):
     """
     全自动处理 - 无需任何人工干预
@@ -87,9 +107,9 @@ async def full_auto_process(
     def report_progress(step: int, detail: str = ""):
         """报告进度"""
         if progress_callback:
-            step_info = PROCESS_STEPS[step - 1]
+            step_info = PROCESS_STEPS[step]
             progress_callback(step, TOTAL_STEPS, step_info[1], detail or step_info[2])
-        print(f"\n[Step {step}/{TOTAL_STEPS}] {PROCESS_STEPS[step-1][1]}...")
+        print(f"\n[Step {step}/{TOTAL_STEPS - 1}] {PROCESS_STEPS[step][1]}...")
     
     # 输入验证
     input_path = Path(input_video)
@@ -112,9 +132,31 @@ async def full_auto_process(
     print(f"工作目录: {work_dir}")
     print("=" * 70)
     
+    # ========== Step 0: 片头片尾检测与去除 ==========
+    report_progress(0, "正在检测片头片尾...")
+    
+    if skip_intro_outro:
+        print("   [SKIP] 跳过片头片尾检测")
+        processed_video = input_video
+        intro_offset = 0
+    else:
+        try:
+            trimmed_output = str(work_dir / "trimmed_video.mp4")
+            processed_video, intro_offset, outro_time = auto_trim_intro_outro(
+                input_video, 
+                trimmed_output,
+                skip_if_short=300  # 5分钟以下视频跳过
+            )
+            if processed_video != input_video:
+                print(f"   已去除片头: {intro_offset:.1f}秒")
+        except Exception as e:
+            print(f"   [WARNING] 片头片尾检测失败: {e}，使用原视频")
+            processed_video = input_video
+            intro_offset = 0
+    
     # ========== Step 1: 镜头切分 ==========
     report_progress(1, "正在分析视频镜头...")
-    scenes, _ = detect_scenes(input_video, str(work_dir))
+    scenes, _ = detect_scenes(processed_video, str(work_dir))
     
     if not scenes or len(scenes) == 0:
         raise RuntimeError("[ERROR] 镜头检测失败，未检测到任何镜头")
@@ -125,7 +167,7 @@ async def full_auto_process(
     report_progress(2, "正在识别视频对白...")
     try:
         segments, transcript = transcribe_video(
-            input_video,
+            processed_video,
             str(work_dir / "subtitles.srt")
         )
         print(f"   识别到 {len(segments)} 段对白")
@@ -136,13 +178,17 @@ async def full_auto_process(
     
     # ========== Step 3: CLIP画面分析 ==========
     report_progress(3, "正在分析画面内容...")
-    analyzer = CLIPAnalyzer()
-    analyzed_scenes = analyzer.analyze_video_scenes(input_video, scenes)
-    del analyzer
+    try:
+        analyzer = CLIPAnalyzer()
+        analyzed_scenes = analyzer.analyze_video_scenes(processed_video, scenes)
+        del analyzer
+    except Exception as e:
+        print(f"   [WARNING] CLIP分析失败: {e}")
+        analyzed_scenes = []
     
     if not analyzed_scenes or len(analyzed_scenes) == 0:
         print("   [WARNING] 画面分析无结果，使用原始镜头列表")
-        analyzed_scenes = [{'start': s[0], 'end': s[1], 'is_important': True, 'confidence': 0.5} for s in scenes]
+        analyzed_scenes = [{'start': s['start'], 'end': s['end'], 'is_important': True, 'confidence': 0.5} for s in scenes]
     GPUManager.clear()
     
     # ========== Step 4: 联网获取电影信息 ==========
@@ -160,6 +206,8 @@ async def full_auto_process(
     
     # ========== Step 5: AI生成文案 ==========
     report_progress(5, "AI正在生成解说文案...")
+    
+    # 尝试生成AI文案
     script = generate_narration_script_enhanced(
         transcript,
         analyzed_scenes,
@@ -168,15 +216,42 @@ async def full_auto_process(
         use_internet=use_internet
     )
     
+    # [FIX] 检查AI文案是否有效
+    ai_script_valid = check_ai_script_valid(script)
+    
+    if not ai_script_valid:
+        print("   [WARNING] AI文案生成失败或无效")
+        print("   [INFO] 将使用纯解说模式（不混合原声）")
+        # 生成一个基于对白的简单文案
+        if transcript and len(transcript) > 50:
+            script = f"""这是一部精彩的影视作品。
+
+{transcript[:2000]}
+
+以上就是这部作品的精彩片段。"""
+        else:
+            script = f"""这是一部精彩的{movie_name if movie_name else '影视作品'}。
+
+故事讲述了一段引人入胜的经历，画面精美，情节紧凑。
+
+让我们一起来欣赏这部作品的精彩片段。"""
+    
     script_file = work_dir / "解说文案.txt"
     script_file.write_text(script, encoding='utf-8')
     print(f"   文案已保存: {script_file}")
+    print(f"   文案长度: {len(script)} 字")
     GPUManager.clear()
     
     # ========== Step 6: 自动检测保留原声片段 ==========
     report_progress(6, "正在检测保留原声片段...")
-    keep_original = auto_detect_keep_original(segments, analyzed_scenes)
-    print(f"   检测到 {len(keep_original)} 个保留原声片段")
+    
+    # [FIX] 如果AI文案失败，不保留原声（全部使用解说）
+    if ai_script_valid:
+        keep_original = auto_detect_keep_original(segments, analyzed_scenes)
+        print(f"   检测到 {len(keep_original)} 个保留原声片段")
+    else:
+        keep_original = []  # AI失败时，不保留原声
+        print("   [INFO] AI文案无效，跳过原声保留检测")
     
     # ========== Step 7: 智能剪辑 ==========
     report_progress(7, "正在选取精彩片段并剪辑...")
@@ -203,7 +278,7 @@ async def full_auto_process(
     # 提取片段
     clip_dir = work_dir / "clips"
     try:
-        generated_clips = extract_clips(input_video, selected_clips, str(clip_dir))
+        generated_clips = extract_clips(processed_video, selected_clips, str(clip_dir))
     except Exception as e:
         raise RuntimeError(f"[ERROR] 片段提取失败: {e}")
     
@@ -233,6 +308,14 @@ async def full_auto_process(
     
     verify_file_exists(str(narration_file), "解说音频")
     
+    # [FIX] 根据AI文案是否有效选择合成模式
+    if ai_script_valid and len(keep_original) > 0:
+        compose_mode = "mix"  # AI成功且有原声保留，使用混合模式
+        print("   使用混合模式（解说+原声）")
+    else:
+        compose_mode = "replace"  # AI失败或无原声保留，完全替换
+        print("   使用替换模式（纯解说）")
+    
     # 视频合成
     composed_video = work_dir / "成品_横屏.mp4"
     try:
@@ -240,9 +323,9 @@ async def full_auto_process(
             str(edited_video),
             str(narration_file),
             str(composed_video),
-            keep_original_segments=keep_original,
+            keep_original_segments=keep_original if compose_mode == "mix" else None,
             subtitle_path=str(work_dir / "subtitles.srt") if (work_dir / "subtitles.srt").exists() else None,
-            mode="mix"
+            mode=compose_mode
         )
     except Exception as e:
         raise RuntimeError(f"[ERROR] 视频合成失败: {e}")
@@ -281,6 +364,10 @@ async def full_auto_process(
     if (work_dir / "cover.jpg").exists():
         print(f"视频封面: {work_dir / 'cover.jpg'}")
     print(f"工作目录: {work_dir}")
+    if not ai_script_valid:
+        print("\n[提示] AI文案生成失败，使用了纯解说模式")
+        print("       请确保Ollama服务已启动: ollama serve")
+        print("       并下载模型: ollama pull qwen2.5:7b")
     print("=" * 70)
     
     return str(final_output)
