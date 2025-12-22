@@ -75,7 +75,7 @@ def auto_detect_keep_original(segments: list, scene_analysis: list) -> list:
                 'text': text[:30] + ('...' if len(text) > 30 else '')
             })
     
-    print(f"✅ 自动检测到 {len(keep_original)} 个需要保留原声的片段")
+    print(f"[OK] 自动检测到 {len(keep_original)} 个需要保留原声的片段")
     
     # 打印前5个
     for i, item in enumerate(keep_original[:5]):
@@ -168,4 +168,3 @@ if __name__ == "__main__":
     
     print("\n按时长过滤:")
     filtered = filter_by_duration(merged)
-

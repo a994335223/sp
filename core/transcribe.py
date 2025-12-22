@@ -8,10 +8,15 @@ SmartVideoClipper - 语音识别模块
 依赖: faster-whisper, torch
 """
 
-from faster_whisper import WhisperModel
-import json
 import os
 import sys
+import json
+
+# 关键：在导入 faster_whisper 之前设置 HuggingFace 镜像
+if "HF_ENDPOINT" not in os.environ:
+    os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
+
+from faster_whisper import WhisperModel
 
 # 添加项目路径
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -73,9 +78,9 @@ def transcribe_video(video_path: str, output_srt: str = None):
         segments.append(segment)
         full_text += seg.text
     
-    print(f"✅ 识别完成，共 {len(segments)} 个片段")
+    print(f"[OK] 识别完成，共 {len(segments)} 个片段")
     
-    # 🔧 释放模型显存
+    # [FIX] 释放模型显存
     del model
     GPUManager.clear()
     
@@ -108,7 +113,7 @@ def save_srt(segments: list, output_path: str):
             f.write(f"{format_time(seg['start'])} --> {format_time(seg['end'])}\n")
             f.write(f"{seg['text']}\n\n")
     
-    print(f"✅ 字幕已保存: {output_path}")
+    print(f"[OK] 字幕已保存: {output_path}")
 
 
 def save_json(segments: list, output_path: str):
@@ -120,7 +125,7 @@ def save_json(segments: list, output_path: str):
     with open(output_path, 'w', encoding='utf-8') as f:
         json.dump(segments, f, ensure_ascii=False, indent=2)
     
-    print(f"✅ JSON已保存: {output_path}")
+    print(f"[OK] JSON已保存: {output_path}")
 
 
 # 使用示例
@@ -135,6 +140,5 @@ if __name__ == "__main__":
         # 保存JSON
         save_json(segments, "segments.json")
     else:
-        print(f"⚠️ 测试视频不存在: {test_video}")
+        print(f"[WARNING] 测试视频不存在: {test_video}")
         print("请提供一个视频文件进行测试")
-

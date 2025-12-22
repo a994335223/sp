@@ -12,7 +12,7 @@ import subprocess
 import os
 import sys
 
-# 🔧 导入统一编码器（使用相对导入）
+# [FIX] 导入统一编码器（使用相对导入）
 try:
     from .smart_cut import VIDEO_ENCODER  # 包导入模式
 except ImportError:
@@ -63,7 +63,7 @@ def apply_cinematic_filter(video_path: str, style: str = "cinematic", output_pat
         'ffmpeg', '-y',
         '-i', video_path,
         '-vf', f"{color_filter},{fade_filter}",
-        '-c:v', VIDEO_ENCODER,  # ⭐ 统一编码器（GTX 1080默认h264_nvenc）
+        '-c:v', VIDEO_ENCODER,  # [STAR] 统一编码器（GTX 1080默认h264_nvenc）
         '-preset', 'fast',
         '-c:a', 'copy',
         output_path
@@ -73,9 +73,9 @@ def apply_cinematic_filter(video_path: str, style: str = "cinematic", output_pat
     result = subprocess.run(cmd, capture_output=True, text=True)
     
     if result.returncode == 0:
-        print(f"✅ 自动润色完成: {output_path}")
+        print(f"[OK] 自动润色完成: {output_path}")
     else:
-        print(f"⚠️ 润色处理出错: {result.stderr[:200]}")
+        print(f"[WARNING] 润色处理出错: {result.stderr[:200]}")
     
     return output_path
 
@@ -97,10 +97,10 @@ def add_transitions(clips_dir: str, output_path: str, transition_type: str = "fa
     ])
     
     if len(clips) < 2:
-        print("⚠️ 片段数量不足，无需添加转场")
+        print("[WARNING] 片段数量不足，无需添加转场")
         return
     
-    print(f"🎬 为{len(clips)}个片段添加{transition_type}转场...")
+    print(f"[VIDEO] 为{len(clips)}个片段添加{transition_type}转场...")
     
     # 创建转场滤镜（简化版，实际需要更复杂的filter_complex）
     # 这里使用简单的淡入淡出
@@ -115,7 +115,7 @@ def add_transitions(clips_dir: str, output_path: str, transition_type: str = "fa
         ]
         subprocess.run(fade_cmd, capture_output=True)
     
-    print(f"✅ 转场效果添加完成")
+    print(f"[OK] 转场效果添加完成")
 
 
 def enhance_audio(video_path: str, output_path: str = None):
@@ -143,13 +143,13 @@ def enhance_audio(video_path: str, output_path: str = None):
         output_path
     ]
     
-    print("🔊 增强音频...")
+    print("[TTS] 增强音频...")
     result = subprocess.run(cmd, capture_output=True, text=True)
     
     if result.returncode == 0:
-        print(f"✅ 音频增强完成: {output_path}")
+        print(f"[OK] 音频增强完成: {output_path}")
     else:
-        print(f"⚠️ 音频增强出错")
+        print(f"[WARNING] 音频增强出错")
     
     return output_path
 
@@ -193,9 +193,9 @@ def add_watermark(video_path: str, text: str, output_path: str = None, position:
         output_path
     ]
     
-    print(f"📝 添加水印: {text}")
+    print(f"[FILE] 添加水印: {text}")
     subprocess.run(cmd, capture_output=True)
-    print(f"✅ 水印添加完成: {output_path}")
+    print(f"[OK] 水印添加完成: {output_path}")
     
     return output_path
 
@@ -216,5 +216,4 @@ if __name__ == "__main__":
         # 测试水印
         add_watermark(test_video, "@SmartVideoClipper", position="bottom_right")
     else:
-        print(f"⚠️ 测试视频不存在: {test_video}")
-
+        print(f"[WARNING] 测试视频不存在: {test_video}")

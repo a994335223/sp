@@ -26,11 +26,11 @@ def detect_scenes(video_path: str, output_dir: str, threshold: float = 27.0):
         scenes: [{'index': 0, 'start': 0.0, 'end': 5.0, 'duration': 5.0}, ...]
         scene_list: PySceneDetect原生场景列表
     """
-    print(f"🎬 开始检测镜头: {video_path}")
+    print(f"[VIDEO] 开始检测镜头: {video_path}")
     
-    # 🔧 检查文件存在性
+    # [FIX] 检查文件存在性
     if not os.path.exists(video_path):
-        raise FileNotFoundError(f"❌ 视频文件不存在: {video_path}")
+        raise FileNotFoundError(f"[ERROR] 视频文件不存在: {video_path}")
     
     # 确保输出目录存在
     os.makedirs(output_dir, exist_ok=True)
@@ -39,11 +39,11 @@ def detect_scenes(video_path: str, output_dir: str, threshold: float = 27.0):
     try:
         scene_list = detect(video_path, ContentDetector(threshold=threshold))
     except Exception as e:
-        print(f"⚠️ 镜头检测失败: {e}")
+        print(f"[WARNING] 镜头检测失败: {e}")
         # 返回整个视频作为单个场景
         scene_list = []
     
-    print(f"✅ 检测到 {len(scene_list)} 个镜头")
+    print(f"[OK] 检测到 {len(scene_list)} 个镜头")
     
     # 保存镜头信息
     scenes = []
@@ -78,7 +78,7 @@ def split_into_scenes(video_path: str, scene_list, output_dir: str):
     """
     os.makedirs(output_dir, exist_ok=True)
     split_video_ffmpeg(video_path, scene_list, output_dir)
-    print(f"✅ 镜头文件已保存到: {output_dir}")
+    print(f"[OK] 镜头文件已保存到: {output_dir}")
 
 
 # 使用示例
@@ -93,6 +93,5 @@ if __name__ == "__main__":
         # 可选：分割成独立文件
         # split_into_scenes(test_video, scene_list, "scenes/")
     else:
-        print(f"⚠️ 测试视频不存在: {test_video}")
+        print(f"[WARNING] 测试视频不存在: {test_video}")
         print("请提供一个视频文件进行测试")
-

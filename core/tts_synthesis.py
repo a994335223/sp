@@ -20,13 +20,13 @@ try:
     import torchaudio
     CHATTTS_AVAILABLE = True
 except ImportError:
-    print("⚠️ ChatTTS未安装，将使用Edge-TTS作为替代（效果也很好！）")
+    print("[INFO] ChatTTS未安装，将使用Edge-TTS作为替代（效果也很好！）")
 
 
 class TTSEngine:
     """语音合成引擎（支持ChatTTS和Edge-TTS）
     
-    💡 推荐：
+    推荐：
     - ChatTTS: 效果更自然，但需要GPU和较复杂的安装
     - Edge-TTS: 微软云端TTS，免费、稳定、无需GPU
     """
@@ -52,24 +52,24 @@ class TTSEngine:
         
         if self.engine == "chattts":
             if not CHATTTS_AVAILABLE:
-                print("⚠️ ChatTTS不可用，切换到Edge-TTS")
+                print("[WARNING] ChatTTS不可用，切换到Edge-TTS")
                 self.engine = "edge"
             else:
                 self._init_chattts()
         
-        print(f"🔊 TTS引擎: {self.engine.upper()}")
+        print(f"[TTS] 引擎: {self.engine.upper()}")
     
     def _init_chattts(self):
         """初始化ChatTTS"""
         try:
-            print("🔊 加载ChatTTS模型...")
+            print("[TTS] 加载ChatTTS模型...")
             self.chat = ChatTTS.Chat()
             self.chat.load(compile=False)  # 大多数显卡不需要compile
             # 生成一个固定音色（可保存复用）
             self.speaker = self.chat.sample_random_speaker()
-            print("✅ ChatTTS加载完成")
+            print("[OK] ChatTTS加载完成")
         except Exception as e:
-            print(f"⚠️ ChatTTS加载失败: {e}")
+            print(f"[WARNING] ChatTTS加载失败: {e}")
             print("   切换到Edge-TTS")
             self.engine = "edge"
     
@@ -111,7 +111,7 @@ class TTSEngine:
         # 保存音频
         import torchaudio
         torchaudio.save(output_path, torch.from_numpy(wavs[0]), 24000)
-        print(f"✅ ChatTTS合成完成: {output_path}")
+        print(f"[OK] ChatTTS合成完成: {output_path}")
     
     async def synthesize_edge(self, text: str, output_path: str, voice: str = "zh-CN-YunxiNeural"):
         """
@@ -132,7 +132,7 @@ class TTSEngine:
         
         communicate = edge_tts.Communicate(text, voice)
         await communicate.save(output_path)
-        print(f"✅ Edge-TTS合成完成: {output_path}")
+        print(f"[OK] Edge-TTS合成完成: {output_path}")
     
     async def synthesize(self, text: str, output_path: str):
         """
@@ -169,4 +169,3 @@ if __name__ == "__main__":
     print("开始语音合成测试...")
     asyncio.run(tts.synthesize(script, "test_narration.wav"))
     print("测试完成！")
-

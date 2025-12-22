@@ -17,15 +17,15 @@ import random
 
 class MovieInfoFetcher:
     """
-    🇨🇳 国内版：使用豆瓣获取电影信息
-    ✅ 无需VPN，国内直接访问
-    ✅ 无需API Key
-    ✅ 数据更贴合国内用户习惯
-    ⚠️ 包含完善的反爬虫处理
+    国内版：使用豆瓣获取电影信息
+    - 无需VPN，国内直接访问
+    - 无需API Key
+    - 数据更贴合国内用户习惯
+    - 包含完善的反爬虫处理
     """
     
     def __init__(self):
-        # 🔧 更完善的请求头，模拟真实浏览器
+        # 更完善的请求头，模拟真实浏览器
         self.headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
@@ -56,7 +56,7 @@ class MovieInfoFetcher:
         """
         for attempt in range(self.max_retries):
             try:
-                # 🔧 添加随机延迟，避免被封
+                # 添加随机延迟，避免被封
                 if attempt > 0:
                     delay = random.uniform(2, 5)
                     print(f"   第{attempt+1}次重试，等待{delay:.1f}秒...")
@@ -64,7 +64,7 @@ class MovieInfoFetcher:
                 
                 return self._search_douban(movie_name)
             except Exception as e:
-                print(f"⚠️ 豆瓣搜索失败 (尝试 {attempt+1}/{self.max_retries}): {e}")
+                print(f"[WARNING] 豆瓣搜索失败 (尝试 {attempt+1}/{self.max_retries}): {e}")
                 if attempt == self.max_retries - 1:
                     return {"title": movie_name, "overview": "", "error": str(e)}
         
@@ -72,10 +72,18 @@ class MovieInfoFetcher:
     
     def _search_douban(self, movie_name: str) -> dict:
         """使用豆瓣搜索（国内可直接访问）"""
-        # 🔧 添加随机延迟
+        # 添加随机延迟
         time.sleep(random.uniform(0.5, 1.5))
         
-        with httpx.Client(headers=self.headers, timeout=15, follow_redirects=True) as client:
+        # 关键修复：每次创建新的客户端，不使用 with 语句
+        # 这样可以避免在异步环境中客户端被提前关闭的问题
+        client = httpx.Client(
+            headers=self.headers, 
+            timeout=15, 
+            follow_redirects=True
+        )
+        
+        try:
             # 1. 搜索电影
             search_url = "https://www.douban.com/search"
             params = {"q": movie_name, "cat": "1002"}  # cat=1002是电影
@@ -140,6 +148,9 @@ class MovieInfoFetcher:
                 "overview": summary[:500],
                 "source": "豆瓣"
             }
+        finally:
+            # 确保关闭客户端
+            client.close()
 
 
 # 使用示例
@@ -155,12 +166,11 @@ if __name__ == "__main__":
         info = fetcher.search_movie(movie)
         
         if "error" not in info:
-            print(f"🎬 电影: {info['title']}")
-            print(f"⭐ 评分: {info['rating']}")
-            print(f"🎬 导演: {info['director']}")
-            print(f"👥 主演: {', '.join(info['cast'][:3])}")
-            print(f"🏷️ 类型: {', '.join(info['genres'])}")
-            print(f"📖 简介: {info['overview'][:100]}...")
+            print(f"电影: {info['title']}")
+            print(f"评分: {info['rating']}")
+            print(f"导演: {info['director']}")
+            print(f"主演: {', '.join(info['cast'][:3])}")
+            print(f"类型: {', '.join(info['genres'])}")
+            print(f"简介: {info['overview'][:100]}...")
         else:
-            print(f"❌ 搜索失败: {info.get('error')}")
-
+            print(f"搜索失败: {info.get('error')}")

@@ -59,11 +59,11 @@ def remove_silence(
             original_size = os.path.getsize(input_path)
             new_size = os.path.getsize(output_path)
             ratio = (1 - new_size / original_size) * 100
-            print(f"✅ 静音剪除完成，视频缩短了约 {ratio:.1f}%")
+            print(f"[OK] 静音剪除完成，视频缩短了约 {ratio:.1f}%")
         else:
-            print(f"✅ 静音剪除完成")
+            print(f"[OK] 静音剪除完成")
     else:
-        print(f"❌ 错误: {result.stderr}")
+        print(f"[ERROR] 错误: {result.stderr}")
     
     return output_path
 
@@ -102,5 +102,4 @@ if __name__ == "__main__":
         print(f"处理后时长: {new_duration:.1f}秒")
         print(f"节省了: {original_duration - new_duration:.1f}秒")
     else:
-        print(f"⚠️ 测试视频不存在: {test_video}")
-
+        print(f"[WARNING] 测试视频不存在: {test_video}")

@@ -1,4 +1,4 @@
-# core/analyze_frames.py - Chinese-CLIP画面分析（🇨🇳 国内版）
+# core/analyze_frames.py - Chinese-CLIP画面分析（国内版）
 """
 SmartVideoClipper - 画面分析模块
 
@@ -8,13 +8,18 @@ SmartVideoClipper - 画面分析模块
 依赖: cn-clip, torch, opencv-python, pillow
 """
 
+import os
+import sys
+
+# 关键：在导入 cn_clip 之前设置 HuggingFace 镜像
+if "HF_ENDPOINT" not in os.environ:
+    os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
+
 import torch
 from PIL import Image
 import cv2
 import numpy as np
 from typing import List, Dict
-import os
-import sys
 
 # 添加项目路径
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -32,7 +37,7 @@ except ImportError:
         from cn_clip import clip
         from cn_clip.clip import load_from_name
     except ImportError:
-        print("⚠️ Chinese-CLIP未安装，请运行: pip install cn-clip")
+        print("[WARNING] Chinese-CLIP未安装，请运行: pip install cn-clip")
         clip = None
         load_from_name = None
 
@@ -66,7 +71,7 @@ class CLIPAnalyzer:
             raise ImportError("Chinese-CLIP未安装，请运行: pip install cn-clip")
         
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        print(f"🖼️ 加载Chinese-CLIP (来源: {CLIP_SOURCE})...")
+        print(f"[IMG] 加载Chinese-CLIP (来源: {CLIP_SOURCE})...")
         print(f"   设备: {self.device}, 模型: {model_name}")
         
         # 加载模型
@@ -79,7 +84,7 @@ class CLIPAnalyzer:
         
         # 预计算场景类型的文本特征
         self._prepare_text_features()
-        print("✅ Chinese-CLIP加载完成")
+        print("[OK] Chinese-CLIP加载完成")
     
     def _prepare_text_features(self):
         """预计算场景类型的文本特征"""
@@ -137,7 +142,7 @@ class CLIPAnalyzer:
         返回:
             分析后的镜头列表，增加了scene_type, confidence, is_important字段
         """
-        print(f"🖼️ 开始CLIP画面分析: {len(scenes)}个镜头")
+        print(f"[IMG] 开始CLIP画面分析: {len(scenes)}个镜头")
         
         cap = cv2.VideoCapture(video_path)
         fps = cap.get(cv2.CAP_PROP_FPS)
@@ -166,7 +171,7 @@ class CLIPAnalyzer:
         cap.release()
         
         important_count = sum(1 for s in analyzed_scenes if s['is_important'])
-        print(f"✅ 分析完成，发现 {important_count} 个重要镜头")
+        print(f"[OK] 分析完成，发现 {important_count} 个重要镜头")
         
         return analyzed_scenes
     
@@ -194,7 +199,6 @@ if __name__ == "__main__":
             for scene in analyzed[:5]:
                 print(f"镜头 {scene['start']:.1f}s: {scene['scene_type']} ({scene['confidence']:.2f})")
         else:
-            print(f"⚠️ 测试视频不存在: {test_video}")
+            print(f"[WARNING] 测试视频不存在: {test_video}")
     except ImportError as e:
-        print(f"❌ 导入错误: {e}")
-
+        print(f"[ERROR] 导入错误: {e}")

@@ -14,16 +14,16 @@ import numpy as np
 import os
 import torch
 
-# 🔧 使用Chinese-CLIP（国内版）
+# [FIX] 使用Chinese-CLIP（国内版）
 CLIP_DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 try:
     import cn_clip.clip as clip
     from cn_clip.clip import load_from_name
-    # 🔧 重命名变量，避免与环境变量CLIP_MODEL冲突
+    # [FIX] 重命名变量，避免与环境变量CLIP_MODEL冲突
     _clip_model, _clip_preprocess = load_from_name("ViT-B-16", device=CLIP_DEVICE, download_root='./models')
 except ImportError:
-    print("⚠️ Chinese-CLIP未安装，封面生成功能不可用")
+    print("[WARNING] Chinese-CLIP未安装，封面生成功能不可用")
     _clip_model = None
     _clip_preprocess = None
 
@@ -66,16 +66,16 @@ def auto_generate_cover(video_path: str, output_path: str):
         output_path: 封面输出路径
     """
     if _clip_model is None:
-        print("⚠️ CLIP模型未加载，无法生成封面")
+        print("[WARNING] CLIP模型未加载，无法生成封面")
         return None
     
-    print("🖼️ 自动生成封面...")
+    print("[IMG] 自动生成封面...")
     
     # 提取关键帧
     frames = extract_keyframes(video_path, num_frames=50)
     
     if not frames:
-        print("⚠️ 无法提取视频帧")
+        print("[WARNING] 无法提取视频帧")
         return None
     
     # 定义"好封面"的特征
@@ -116,10 +116,10 @@ def auto_generate_cover(video_path: str, output_path: str):
     if best_frame is not None:
         success = cv2.imwrite(output_path, best_frame)
         if success:
-            print(f"✅ 封面已保存: {output_path} (得分: {best_score:.3f})")
+            print(f"[OK] 封面已保存: {output_path} (得分: {best_score:.3f})")
             return output_path
         else:
-            print(f"⚠️ 封面保存失败: {output_path}")
+            print(f"[WARNING] 封面保存失败: {output_path}")
             return None
     
     return None
@@ -140,7 +140,7 @@ def add_title_to_cover(cover_path: str, title: str, output_path: str = None):
     # 读取图片
     image = cv2.imread(cover_path)
     if image is None:
-        print(f"⚠️ 无法读取封面: {cover_path}")
+        print(f"[WARNING] 无法读取封面: {cover_path}")
         return
     
     h, w = image.shape[:2]
@@ -166,9 +166,9 @@ def add_title_to_cover(cover_path: str, title: str, output_path: str = None):
     
     success = cv2.imwrite(output_path, image)
     if success:
-        print(f"✅ 标题已添加: {output_path}")
+        print(f"[OK] 标题已添加: {output_path}")
     else:
-        print(f"⚠️ 标题保存失败: {output_path}")
+        print(f"[WARNING] 标题保存失败: {output_path}")
 
 
 # 使用示例
@@ -183,6 +183,5 @@ if __name__ == "__main__":
         if cover:
             add_title_to_cover("cover.jpg", "精彩解说")
     else:
-        print(f"⚠️ 测试视频不存在: {test_video}")
+        print(f"[WARNING] 测试视频不存在: {test_video}")
         print("请提供一个视频文件进行测试")
-

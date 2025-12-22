@@ -8,16 +8,21 @@ SmartVideoClipper - 视频合成模块
 依赖: moviepy, ffmpeg
 """
 
-from moviepy.editor import *
 import subprocess
 import os
 import sys
 
-# 🔧 导入统一编码器
+# MoviePy 2.x 兼容导入
 try:
-    from .smart_cut import VIDEO_ENCODER  # 包导入模式
+    from moviepy import VideoFileClip, AudioFileClip, CompositeAudioClip
 except ImportError:
-    from smart_cut import VIDEO_ENCODER   # 直接导入模式
+    from moviepy.editor import VideoFileClip, AudioFileClip, CompositeAudioClip
+
+# 导入统一编码器
+try:
+    from .smart_cut import VIDEO_ENCODER
+except ImportError:
+    from smart_cut import VIDEO_ENCODER
 
 
 def compose_final_video(
@@ -35,99 +40,115 @@ def compose_final_video(
         video_path: 剪辑后的视频
         narration_path: 解说音频
         output_path: 输出路径
-        keep_original_segments: 需要保留原声的时间段 [{'start': 10, 'end': 20}, ...]
+        keep_original_segments: 需要保留原声的时间段
         subtitle_path: 字幕文件（可选）
         mode: "mix"=混合, "replace"=完全替换
     """
-    print("🎬 开始合成最终视频...")
+    print("[VIDEO] 开始合成最终视频...")
     
     # 确保输出目录存在
     output_dir = os.path.dirname(output_path)
     if output_dir:
         os.makedirs(output_dir, exist_ok=True)
     
-    # 🔧 添加文件存在性检查
+    # 文件检查
     if not os.path.exists(video_path):
-        raise FileNotFoundError(f"❌ 视频文件不存在: {video_path}")
+        raise FileNotFoundError(f"[ERROR] 视频文件不存在: {video_path}")
     if not os.path.exists(narration_path):
-        raise FileNotFoundError(f"❌ 解说音频不存在: {narration_path}")
+        raise FileNotFoundError(f"[ERROR] 解说音频不存在: {narration_path}")
     
     try:
         video = VideoFileClip(video_path)
         narration = AudioFileClip(narration_path)
     except Exception as e:
-        raise RuntimeError(f"❌ 加载视频/音频失败: {e}")
+        raise RuntimeError(f"[ERROR] 加载视频/音频失败: {e}")
     
-    if mode == "replace":
-        # 完全替换原声
-        final_video = video.set_audio(narration)
+    # 检测 MoviePy 版本并选择正确的方法
+    has_with_audio = hasattr(video, 'with_audio')
     
-    elif mode == "mix":
-        # 智能混合：解说时降低原声，保留原声时静音解说
-        original_audio = video.audio
+    try:
+        if mode == "replace":
+            # 完全替换原声
+            if has_with_audio:
+                final_video = video.with_audio(narration)
+            else:
+                final_video = video.set_audio(narration)
         
-        if keep_original_segments and len(keep_original_segments) > 0:
-            # 🔧 真正的分段音量控制
-            # 方法：根据时间段调整解说音量
+        elif mode == "mix":
+            # 智能混合
+            original_audio = video.audio
             
-            def get_narration_volume(t):
-                """在保留原声片段时，解说音量降为0"""
-                for seg in keep_original_segments:
-                    if seg['start'] <= t <= seg['end']:
-                        return 0.0  # 保留原声时，解说静音
-                return 1.0  # 其他时间解说正常
-            
-            def get_original_volume(t):
-                """在保留原声片段时，原声音量100%"""
-                for seg in keep_original_segments:
-                    if seg['start'] <= t <= seg['end']:
-                        return 1.0  # 保留原声片段
-                return 0.2  # 其他时间原声20%
-            
-            # 应用音量调节
-            from moviepy.audio.fx.all import volumex
-            narration_adjusted = narration.fl(lambda gf, t: gf(t) * get_narration_volume(t), keep_duration=True)
-            original_adjusted = original_audio.fl(lambda gf, t: gf(t) * get_original_volume(t), keep_duration=True)
-            
-            mixed = CompositeAudioClip([original_adjusted, narration_adjusted])
-            print(f"   🎵 已应用分段音量控制，{len(keep_original_segments)}个原声保留片段")
+            if original_audio is None:
+                # 视频没有音轨，直接使用解说
+                if has_with_audio:
+                    final_video = video.with_audio(narration)
+                else:
+                    final_video = video.set_audio(narration)
+            else:
+                # 简化版混合：降低原声音量，叠加解说
+                try:
+                    # MoviePy 2.x 方式
+                    if hasattr(original_audio, 'with_volume_scaled'):
+                        original_low = original_audio.with_volume_scaled(0.2)
+                    else:
+                        original_low = original_audio.volumex(0.2)
+                    
+                    mixed = CompositeAudioClip([original_low, narration])
+                    
+                    if has_with_audio:
+                        final_video = video.with_audio(mixed)
+                    else:
+                        final_video = video.set_audio(mixed)
+                        
+                except Exception as e:
+                    print(f"   [WARNING] 音频混合失败: {e}，使用纯解说")
+                    if has_with_audio:
+                        final_video = video.with_audio(narration)
+                    else:
+                        final_video = video.set_audio(narration)
+        
         else:
-            # 没有保留原声片段，简单混合
-            original_audio = original_audio.volumex(0.2)
-            mixed = CompositeAudioClip([original_audio, narration])
+            # 默认替换
+            if has_with_audio:
+                final_video = video.with_audio(narration)
+            else:
+                final_video = video.set_audio(narration)
         
-        final_video = video.set_audio(mixed)
-    
-    # 导出（使用GPU加速）
-    # ⭐ GTX 1080+支持NVENC硬件编码，速度快5-10倍！
-    # 🔧 MoviePy需要通过ffmpeg_params传递NVENC参数
-    if VIDEO_ENCODER == 'h264_nvenc':
-        # GPU加速模式
-        final_video.write_videofile(
-            output_path,
-            codec='libx264',  # MoviePy基础codec
-            audio_codec='aac',
-            bitrate='8000k',
-            fps=video.fps,
-            ffmpeg_params=['-c:v', 'h264_nvenc', '-preset', 'fast']  # ⭐ 覆盖为GPU编码
-        )
-    else:
-        # CPU模式（fallback）
+        # 导出
+        print("   正在导出视频...")
+        fps = video.fps if video.fps else 24
+        
         final_video.write_videofile(
             output_path,
             codec='libx264',
             audio_codec='aac',
             bitrate='8000k',
-            fps=video.fps,
-            preset='fast'
+            fps=fps,
+            preset='fast',
+            logger=None  # 禁用进度条避免乱码
         )
+        
+    finally:
+        # 释放资源
+        try:
+            video.close()
+        except:
+            pass
+        try:
+            narration.close()
+        except:
+            pass
+        try:
+            if 'final_video' in locals():
+                final_video.close()
+        except:
+            pass
     
-    # 🔧 释放资源（重要！避免内存泄露）
-    video.close()
-    narration.close()
-    final_video.close()
+    # 验证输出
+    if not os.path.exists(output_path) or os.path.getsize(output_path) < 1000:
+        raise RuntimeError("[ERROR] 视频导出失败")
     
-    print(f"✅ 视频合成完成: {output_path}")
+    print(f"[OK] 视频合成完成: {output_path}")
     
     # 添加字幕（如果有）
     if subtitle_path and os.path.exists(subtitle_path):
@@ -136,74 +157,65 @@ def compose_final_video(
 
 
 def add_subtitles(video_path: str, srt_path: str, output_path: str):
-    """
-    添加硬字幕
-    
-    参数:
-        video_path: 视频文件
-        srt_path: SRT字幕文件
-        output_path: 输出文件
-    """
-    # 确保输出目录存在
+    """添加硬字幕"""
     output_dir = os.path.dirname(output_path)
     if output_dir:
         os.makedirs(output_dir, exist_ok=True)
+    
+    # 处理路径中的特殊字符
+    srt_path_escaped = srt_path.replace('\\', '/').replace(':', '\\:')
     
     cmd = [
         'ffmpeg', '-y',
         '-i', video_path,
-        '-vf', f"subtitles={srt_path}:force_style='FontSize=24,FontName=Microsoft YaHei'",
+        '-vf', f"subtitles='{srt_path_escaped}':force_style='FontSize=24,FontName=Microsoft YaHei'",
         '-c:a', 'copy',
+        '-loglevel', 'error',
         output_path
     ]
-    subprocess.run(cmd, capture_output=True)
-    print(f"✅ 字幕添加完成: {output_path}")
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    
+    if os.path.exists(output_path):
+        print(f"[OK] 字幕添加完成: {output_path}")
+    else:
+        print(f"[WARNING] 字幕添加失败: {result.stderr[:100] if result.stderr else 'unknown'}")
 
 
 def convert_to_douyin(input_path: str, output_path: str):
-    """
-    转换为抖音竖屏格式（9:16）
-    
-    参数:
-        input_path: 输入视频
-        output_path: 输出视频
-    """
-    # 确保输出目录存在
+    """转换为抖音竖屏格式（9:16）"""
     output_dir = os.path.dirname(output_path)
     if output_dir:
         os.makedirs(output_dir, exist_ok=True)
+    
+    # 优先尝试 GPU 编码
+    encoder = VIDEO_ENCODER if VIDEO_ENCODER else 'libx264'
     
     cmd = [
         'ffmpeg', '-y',
         '-i', input_path,
         '-vf', 'scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black',
-        '-c:v', VIDEO_ENCODER,  # ⭐ 统一编码器（GTX 1080默认h264_nvenc）
+        '-c:v', encoder,
         '-preset', 'fast',
         '-c:a', 'aac',
         '-b:v', '8M',
+        '-loglevel', 'error',
         output_path
     ]
-    subprocess.run(cmd, capture_output=True)
-    print(f"✅ 抖音格式转换完成: {output_path}")
-
-
-# 使用示例
-if __name__ == "__main__":
-    # 测试视频合成
-    print(f"当前编码器: {VIDEO_ENCODER}")
     
-    test_video = "test_video.mp4"
-    test_narration = "test_narration.wav"
+    result = subprocess.run(cmd, capture_output=True, text=True)
     
-    if os.path.exists(test_video) and os.path.exists(test_narration):
-        compose_final_video(
-            test_video,
-            test_narration,
-            "output_composed.mp4",
-            mode="mix"
-        )
-        convert_to_douyin("output_composed.mp4", "output_douyin.mp4")
+    # 如果 GPU 失败，尝试 CPU
+    if not os.path.exists(output_path) or os.path.getsize(output_path) < 1000:
+        if encoder != 'libx264':
+            print("   [INFO] GPU编码失败，使用CPU...")
+            cmd[cmd.index(encoder)] = 'libx264'
+            result = subprocess.run(cmd, capture_output=True, text=True)
+    
+    if os.path.exists(output_path) and os.path.getsize(output_path) > 1000:
+        print(f"[OK] 抖音格式转换完成: {output_path}")
     else:
-        print(f"⚠️ 测试文件不存在")
-        print(f"   需要: {test_video}, {test_narration}")
+        raise RuntimeError(f"[ERROR] 抖音格式转换失败: {result.stderr[:200] if result.stderr else 'unknown'}")
 
+
+if __name__ == "__main__":
+    print(f"当前编码器: {VIDEO_ENCODER}")

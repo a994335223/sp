@@ -59,7 +59,7 @@ def generate_narration_script(
 直接输出解说文案，段落之间空一行。需要保留原声的地方用标记说明。
 """
     
-    print("🤖 AI正在生成解说文案...")
+    print("[AI] AI正在生成解说文案...")
     print("   （大约需要30-60秒）")
     
     try:
@@ -74,12 +74,12 @@ def generate_narration_script(
         )
         
         script = response['message']['content']
-        print(f"✅ 文案生成完成，共 {len(script)} 字")
+        print(f"[OK] 文案生成完成，共 {len(script)} 字")
         
         return script
     except Exception as e:
-        print(f"❌ Ollama调用失败: {e}")
-        print("💡 请确保：1) Ollama已安装并运行 2) 已下载qwen2.5模型 (ollama pull qwen2.5:7b)")
+        print(f"[ERROR] Ollama调用失败: {e}")
+        print("[TIP] 请确保：1) Ollama已安装并运行 2) 已下载qwen2.5模型 (ollama pull qwen2.5:7b)")
         # 返回一个基础文案模板
         return f"""【解说文案 - 自动生成失败，请手动编辑】
 
@@ -131,9 +131,9 @@ def generate_narration_script_enhanced(
 - 主演: {', '.join(info.get('cast', [])[:3])}
 - 剧情简介: {info.get('overview', '')[:300]}
 """
-            print(f"🌐 已获取电影信息: {info.get('title')}")
+            print(f"[NET] 已获取电影信息: {info.get('title')}")
         except Exception as e:
-            print(f"⚠️ 联网搜索失败: {e}")
+            print(f"[WARNING] 联网搜索失败: {e}")
             movie_info = ""
     
     # 整理重要镜头信息
@@ -167,7 +167,7 @@ def generate_narration_script_enhanced(
 在需要保留原声的地方，自动标注【原声:XX秒-XX秒】。
 """
     
-    print("🤖 AI正在生成增强版解说文案...")
+    print("[AI] AI正在生成增强版解说文案...")
     print("   （大约需要30-60秒）")
     
     try:
@@ -182,12 +182,12 @@ def generate_narration_script_enhanced(
         )
         
         script = response['message']['content']
-        print(f"✅ 增强版文案生成完成，共 {len(script)} 字")
+        print(f"[OK] 增强版文案生成完成，共 {len(script)} 字")
         
         return script
     except Exception as e:
-        print(f"❌ Ollama调用失败: {e}")
-        print("💡 请确保：1) Ollama已安装并运行 2) 已下载qwen2.5模型 (ollama pull qwen2.5:7b)")
+        print(f"[ERROR] Ollama调用失败: {e}")
+        print("[TIP] 请确保：1) Ollama已安装并运行 2) 已下载qwen2.5模型 (ollama pull qwen2.5:7b)")
         # 返回一个基础文案模板
         return f"""【解说文案 - 自动生成失败，请手动编辑】
 
@@ -226,7 +226,6 @@ if __name__ == "__main__":
         print("-" * 50)
         print(script)
     except Exception as e:
-        print(f"❌ 生成失败: {e}")
+        print(f"[ERROR] 生成失败: {e}")
         print("请确保Ollama已安装并运行: ollama serve")
         print("并下载模型: ollama pull qwen2.5:7b")
-

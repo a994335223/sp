@@ -24,7 +24,7 @@ class GPUManager:
             'clip': 'ViT-B-16',
             'qwen': 'qwen2.5:3b'
         },
-        8: {  # 8GB显存 (GTX 1080, RTX 3060) ⭐推荐
+        8: {  # 8GB显存 (GTX 1080, RTX 3060) [STAR]推荐
             'whisper': 'medium',
             'clip': 'ViT-B-16',
             'qwen': 'qwen2.5:7b'
@@ -82,8 +82,8 @@ class GPUManager:
             config_key = 6
         
         config = cls.MODEL_CONFIGS[config_key]
-        print(f"🎮 检测到显存: {total_gb:.1f}GB")
-        print(f"📋 自动选择配置: Whisper={config['whisper']}, CLIP={config['clip']}, Qwen={config['qwen']}")
+        print(f"[GPU] 检测到显存: {total_gb:.1f}GB")
+        print(f"[LIST] 自动选择配置: Whisper={config['whisper']}, CLIP={config['clip']}, Qwen={config['qwen']}")
         
         return config
     
@@ -135,5 +135,4 @@ if __name__ == "__main__":
     
     print("\n测试显存清理:")
     GPUManager.clear()
-    print("✅ 显存已清理")
-
+    print("[OK] 显存已清理")
