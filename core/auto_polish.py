@@ -70,7 +70,7 @@ def apply_cinematic_filter(video_path: str, style: str = "cinematic", output_pat
     ]
     
     print(f"🎨 应用{style}风格滤镜...")
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='ignore')
     
     if result.returncode == 0:
         print(f"[OK] 自动润色完成: {output_path}")
@@ -113,7 +113,7 @@ def add_transitions(clips_dir: str, output_path: str, transition_type: str = "fa
             '-c:a', 'aac',
             clip.replace('.mp4', '_fade.mp4')
         ]
-        subprocess.run(fade_cmd, capture_output=True)
+        subprocess.run(fade_cmd, capture_output=True, encoding='utf-8', errors='ignore')
     
     print(f"[OK] 转场效果添加完成")
 
@@ -144,7 +144,7 @@ def enhance_audio(video_path: str, output_path: str = None):
     ]
     
     print("[TTS] 增强音频...")
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='ignore')
     
     if result.returncode == 0:
         print(f"[OK] 音频增强完成: {output_path}")
@@ -194,7 +194,7 @@ def add_watermark(video_path: str, text: str, output_path: str = None, position:
     ]
     
     print(f"[FILE] 添加水印: {text}")
-    subprocess.run(cmd, capture_output=True)
+    subprocess.run(cmd, capture_output=True, encoding='utf-8', errors='ignore')
     print(f"[OK] 水印添加完成: {output_path}")
     
     return output_path

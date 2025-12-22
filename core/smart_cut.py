@@ -18,7 +18,7 @@ def get_video_encoder():
     try:
         result = subprocess.run(
             ['ffmpeg', '-hide_banner', '-encoders'],
-            capture_output=True, text=True
+            capture_output=True, text=True, encoding='utf-8', errors='ignore'
         )
         if 'h264_nvenc' in result.stdout:
             print("[GPU] 检测到NVENC硬件编码支持")
@@ -67,7 +67,7 @@ def extract_single_clip(video_path: str, start: float, duration: float, output_p
             output_path
         ]
     
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='ignore')
     
     # 检查结果
     if os.path.exists(output_path) and os.path.getsize(output_path) > 1000:
@@ -158,7 +158,7 @@ def extract_clips(video_path: str, clips: list, output_dir: str):
         # 尝试用最简单的命令测试
         test_output = os.path.join(output_dir, "test_clip.mp4")
         test_cmd = ['ffmpeg', '-y', '-i', video_path, '-t', '5', '-c:v', 'libx264', '-c:a', 'aac', test_output]
-        test_result = subprocess.run(test_cmd, capture_output=True, text=True)
+        test_result = subprocess.run(test_cmd, capture_output=True, text=True, encoding='utf-8', errors='ignore')
         if os.path.exists(test_output) and os.path.getsize(test_output) > 0:
             print(f"   - 基础FFmpeg测试: 成功")
             os.remove(test_output)
@@ -215,7 +215,7 @@ def concat_clips(clip_files: list, output_path: str):
         output_path
     ]
     
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='ignore')
     
     # 如果 copy 模式失败，尝试重新编码
     if not os.path.exists(output_path) or os.path.getsize(output_path) < 1000:
@@ -230,7 +230,7 @@ def concat_clips(clip_files: list, output_path: str):
             '-loglevel', 'error',
             output_path
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='ignore')
     
     # 清理
     if os.path.exists(list_file):

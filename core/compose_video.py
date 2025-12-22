@@ -188,7 +188,7 @@ def add_subtitles(video_path: str, srt_path: str, output_path: str):
         '-loglevel', 'error',
         output_path
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='ignore')
     
     if os.path.exists(output_path):
         print(f"[OK] 字幕添加完成: {output_path}")
@@ -217,14 +217,14 @@ def convert_to_douyin(input_path: str, output_path: str):
         output_path
     ]
     
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='ignore')
     
     # 如果 GPU 失败，尝试 CPU
     if not os.path.exists(output_path) or os.path.getsize(output_path) < 1000:
         if encoder != 'libx264':
             print("   [INFO] GPU编码失败，使用CPU...")
             cmd[cmd.index(encoder)] = 'libx264'
-            result = subprocess.run(cmd, capture_output=True, text=True)
+            result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='ignore')
     
     if os.path.exists(output_path) and os.path.getsize(output_path) > 1000:
         print(f"[OK] 抖音格式转换完成: {output_path}")

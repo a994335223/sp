@@ -46,7 +46,7 @@ def remove_silence(
         '-o', output_path
     ]
     
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='ignore')
     
     if result.returncode == 0:
         # 计算压缩比
@@ -80,7 +80,7 @@ def get_video_duration(video_path: str) -> float:
             '-of', 'default=noprint_wrappers=1:nokey=1',
             video_path
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='ignore')
         return float(result.stdout.strip())
     except:
         return 0

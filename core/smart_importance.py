@@ -40,7 +40,7 @@ def extract_audio_energy(video_path: str, output_dir: str) -> List[Dict]:
         '-loglevel', 'error',
         audio_file
     ]
-    subprocess.run(cmd, capture_output=True)
+    subprocess.run(cmd, capture_output=True, encoding='utf-8', errors='ignore')
     
     if not os.path.exists(audio_file):
         print("   [WARNING] 音频提取失败")
@@ -57,7 +57,7 @@ def extract_audio_energy(video_path: str, output_dir: str) -> List[Dict]:
             '-of', 'default=noprint_wrappers=1:nokey=1',
             video_path
         ]
-        result = subprocess.run(duration_cmd, capture_output=True, text=True)
+        result = subprocess.run(duration_cmd, capture_output=True, text=True, encoding='utf-8', errors='ignore')
         total_duration = float(result.stdout.strip())
         
         # 每5秒分析一次音频能量
@@ -268,7 +268,7 @@ def calculate_importance_scores(
         '-of', 'default=noprint_wrappers=1:nokey=1',
         video_path
     ]
-    result = subprocess.run(duration_cmd, capture_output=True, text=True)
+    result = subprocess.run(duration_cmd, capture_output=True, text=True, encoding='utf-8', errors='ignore')
     total_duration = float(result.stdout.strip()) if result.stdout.strip() else 0
     
     if total_duration == 0:

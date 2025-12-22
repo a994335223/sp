@@ -30,7 +30,7 @@ def get_video_duration(video_path: str) -> float:
             '-of', 'default=noprint_wrappers=1:nokey=1',
             video_path
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='ignore')
         return float(result.stdout.strip())
     except:
         cap = cv2.VideoCapture(video_path)
@@ -340,7 +340,7 @@ def trim_video(
         output_path
     ]
     
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='ignore')
     
     if not os.path.exists(output_path) or os.path.getsize(output_path) < 1000:
         print("   快速裁剪失败，尝试重新编码...")
@@ -355,7 +355,7 @@ def trim_video(
             '-loglevel', 'error',
             output_path
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='ignore')
     
     if os.path.exists(output_path) and os.path.getsize(output_path) > 1000:
         print(f"[OK] 视频裁剪完成: {output_path}")
