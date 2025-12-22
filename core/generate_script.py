@@ -5,10 +5,57 @@ SmartVideoClipper - AI文案生成模块
 功能: 使用Ollama+Qwen生成影视解说文案
 用途: 根据对白和镜头分析，生成幽默吐槽风格的解说
 
-依赖: ollama (需要先安装Ollama应用并下载qwen2.5模型)
+依赖: ollama (需要先安装Ollama应用并下载qwen3模型)
+
+支持的模型（按推荐顺序）:
+- qwen3:30b (推荐，效果最好)
+- qwen3:8b
+- qwen2.5:7b
 """
 
 import ollama
+
+
+def get_available_model():
+    """
+    自动检测并选择最佳可用模型
+    优先级: qwen3:30b > qwen3:8b > qwen2.5:7b > qwen2.5:3b
+    """
+    preferred_models = [
+        'qwen3:30b',
+        'qwen3:8b', 
+        'qwen2.5:7b',
+        'qwen2.5:3b'
+    ]
+    
+    try:
+        # 获取已安装的模型列表
+        models = ollama.list()
+        installed = [m['name'].split(':')[0] + ':' + m['name'].split(':')[1] if ':' in m['name'] else m['name'] 
+                     for m in models.get('models', [])]
+        
+        # 按优先级查找
+        for model in preferred_models:
+            for installed_model in installed:
+                if model in installed_model or installed_model.startswith(model.split(':')[0]):
+                    print(f"[AI] 检测到模型: {installed_model}")
+                    return installed_model
+        
+        # 如果没有找到首选模型，返回第一个qwen模型
+        for installed_model in installed:
+            if 'qwen' in installed_model.lower():
+                print(f"[AI] 使用模型: {installed_model}")
+                return installed_model
+                
+    except Exception as e:
+        print(f"[WARNING] 模型检测失败: {e}")
+    
+    # 默认返回
+    return 'qwen3:30b'
+
+
+# 全局模型变量
+OLLAMA_MODEL = None
 
 
 def generate_narration_script(
@@ -59,17 +106,22 @@ def generate_narration_script(
 直接输出解说文案，段落之间空一行。需要保留原声的地方用标记说明。
 """
     
-    print("[AI] AI正在生成解说文案...")
-    print("   （大约需要30-60秒）")
+    # 自动选择模型
+    global OLLAMA_MODEL
+    if OLLAMA_MODEL is None:
+        OLLAMA_MODEL = get_available_model()
+    
+    print(f"[AI] 使用 {OLLAMA_MODEL} 生成解说文案...")
+    print("   （大约需要30-90秒，取决于模型大小）")
     
     try:
         response = ollama.chat(
-            model='qwen2.5:7b',  # 8GB显存用7B（程序自动选择）
+            model=OLLAMA_MODEL,
             messages=[{'role': 'user', 'content': prompt}],
             options={
                 'temperature': 0.7,
                 'top_p': 0.9,
-                'num_predict': 2000
+                'num_predict': 2500  # 增加输出长度
             }
         )
         
@@ -79,7 +131,7 @@ def generate_narration_script(
         return script
     except Exception as e:
         print(f"[ERROR] Ollama调用失败: {e}")
-        print("[TIP] 请确保：1) Ollama已安装并运行 2) 已下载qwen2.5模型 (ollama pull qwen2.5:7b)")
+        print(f"[TIP] 请确保：1) Ollama已安装并运行 2) 已下载模型 (ollama pull qwen3:30b)")
         # 返回一个基础文案模板
         return f"""【解说文案 - 自动生成失败，请手动编辑】
 
@@ -167,17 +219,22 @@ def generate_narration_script_enhanced(
 在需要保留原声的地方，自动标注【原声:XX秒-XX秒】。
 """
     
-    print("[AI] AI正在生成增强版解说文案...")
-    print("   （大约需要30-60秒）")
+    # 自动选择模型
+    global OLLAMA_MODEL
+    if OLLAMA_MODEL is None:
+        OLLAMA_MODEL = get_available_model()
+    
+    print(f"[AI] 使用 {OLLAMA_MODEL} 生成增强版解说文案...")
+    print("   （大约需要30-90秒，取决于模型大小）")
     
     try:
         response = ollama.chat(
-            model='qwen2.5:7b',
+            model=OLLAMA_MODEL,
             messages=[{'role': 'user', 'content': prompt}],
             options={
                 'temperature': 0.7,
                 'top_p': 0.9,
-                'num_predict': 2000
+                'num_predict': 2500  # 增加输出长度
             }
         )
         
@@ -187,7 +244,7 @@ def generate_narration_script_enhanced(
         return script
     except Exception as e:
         print(f"[ERROR] Ollama调用失败: {e}")
-        print("[TIP] 请确保：1) Ollama已安装并运行 2) 已下载qwen2.5模型 (ollama pull qwen2.5:7b)")
+        print(f"[TIP] 请确保：1) Ollama已安装并运行 2) 已下载模型 (ollama pull qwen3:30b)")
         # 返回一个基础文案模板
         return f"""【解说文案 - 自动生成失败，请手动编辑】
 
