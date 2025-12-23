@@ -1,21 +1,23 @@
-# core/pipeline_v5.py - 智能视频剪辑流水线 v5.0 (已修复版)
+# core/pipeline_v5.py - 智能视频剪辑流水线 v5.4 (语音识别优化版)
 """
-SmartVideoClipper v5.0 - 全球第一的智能视频解说
+SmartVideoClipper v5.4 - 全球第一的智能视频解说
 
-已修复的核心问题：
-1. ✅ 音频分段切换（每个片段独立处理，不是全程混音）
-2. ✅ TTS分段生成（每个解说场景单独生成音频）
-3. ✅ 解说-画面时长对齐
-4. ✅ 智能时长控制
-5. ✅ 敏感词多层过滤
+v5.4 优化：
+1. [OK] 修复模板文字问题（删除"情节推进中"等垃圾内容）
+2. [OK] 重构解说生成逻辑（AI概括而非截断对话）
+3. [OK] 添加广告检测（检测中间插入广告）
+4. [OK] 修复解说重复问题（检测连续相似内容）
+5. [OK] 优化TTS平滑处理（音频淡入淡出）
+6. [OK] 合并相邻短场景（减少TTS碎片化）
+7. [NEW] 语音识别优化（initial_prompt解决中文乱码）
 
 处理流程：
-Step 0: 预处理（去片头片尾）
+Step 0: 预处理（去片头片尾 + 广告检测）
 Step 1: 语音识别（获取对话）
 Step 2: 场景分析（标记精彩/过渡）
 Step 3: 智能解说（生成文案）
-Step 4: 时长控制（选择场景）
-Step 5: TTS分段合成
+Step 4: 时长控制（选择场景 + 合并短场景）
+Step 5: TTS分段合成（带淡入淡出）
 Step 6: 片段处理（原声/解说分开）
 Step 7: 输出成品
 """
@@ -104,20 +106,35 @@ class VideoPipelineV5:
         self.work_dir = project_root / f"workspace_{output_name}"
         self.work_dir.mkdir(exist_ok=True)
         
-        def report_progress(step: int, message: str):
-            """报告进度"""
+        def report_progress(step: int, message: str, sub_step: str = ""):
+            """报告进度 - 实时输出"""
+            import sys
             elapsed = (datetime.now() - self.start_time).seconds
             pct = int(step / 8 * 100)
             
-            print(f"\n{'='*60}")
-            print(f"[{datetime.now().strftime('%H:%M:%S')}] 进度: {'█'*(pct//3)}{'░'*(33-pct//3)} {pct}%")
-            print(f"[{datetime.now().strftime('%H:%M:%S')}] 步骤 {step}/8: {PROCESS_STEPS_V5.get(step, '未知')}")
-            print(f"[{datetime.now().strftime('%H:%M:%S')}] {message}")
-            print(f"[{datetime.now().strftime('%H:%M:%S')}] 已耗时: {elapsed}秒")
-            print(f"{'='*60}")
+            # 进度条
+            bar_filled = pct // 3
+            bar_empty = 33 - bar_filled
+            bar = '#' * bar_filled + '-' * bar_empty
+            
+            print(f"\n{'='*60}", flush=True)
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] [{bar}] {pct}%", flush=True)
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] 步骤 {step}/8: {PROCESS_STEPS_V5.get(step, '未知')}", flush=True)
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] {message}", flush=True)
+            if sub_step:
+                print(f"[{datetime.now().strftime('%H:%M:%S')}]    -> {sub_step}", flush=True)
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] 已耗时: {elapsed}秒 ({elapsed//60}分{elapsed%60}秒)", flush=True)
+            print(f"{'='*60}", flush=True)
+            sys.stdout.flush()
             
             if progress_callback:
                 progress_callback(step, message, pct)
+        
+        def log(msg: str):
+            """实时日志输出"""
+            import sys
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}", flush=True)
+            sys.stdout.flush()
         
         # 自动检测媒体类型和集数
         from plot_fetcher import parse_episode_from_filename, extract_title_from_filename
@@ -139,14 +156,16 @@ class VideoPipelineV5:
         
         # 打印启动信息
         print("\n" + "="*60)
-        print("[PIPELINE] SmartVideoClipper v5.1 - 电影/电视剧分离版")
+        print("[PIPELINE] SmartVideoClipper v5.2 - 深度优化版")
         print("="*60)
-        print("   核心升级:")
-        print("   1. [OK] 电影/电视剧模式分离（解说策略不同）")
-        print("   2. [OK] 音频分段切换（每个片段独立处理）")
-        print("   3. [OK] TTS分段生成（解说-画面精确对齐）")
-        print("   4. [OK] 智能时长控制")
-        print("   5. [OK] GPU硬件加速编码")
+        print("   v5.2 深度优化:")
+        print("   1. [OK] 修复模板文字问题（删除垃圾内容）")
+        print("   2. [OK] 重构解说生成（AI概括而非截断）")
+        print("   3. [OK] 广告检测（检测中间广告）")
+        print("   4. [OK] 去重解说（删除重复内容）")
+        print("   5. [OK] TTS平滑处理（淡入淡出）")
+        print("   6. [OK] 合并短场景（减少碎片）")
+        print("   7. [OK] GPU硬件加速编码")
         print("="*60)
         
         # GPU加速状态
@@ -177,7 +196,7 @@ class VideoPipelineV5:
         
         try:
             # ========== Step 0: 预处理 ==========
-            report_progress(0, "检测并去除片头片尾...")
+            report_progress(0, "检测并去除片头片尾、广告...")
             
             from intro_outro_detect import auto_trim_intro_outro
             # 返回值: (输出路径, 片头结束时间, 片尾开始时间)
@@ -192,23 +211,41 @@ class VideoPipelineV5:
                 processed_video = video_path
                 print("   [INFO] 无需裁剪，使用原视频")
             
+            # 广告检测（稍后在时间线过滤中使用）
+            detected_ads = []
+            try:
+                from ad_detector import AdDetector
+                ad_detector = AdDetector()
+                detected_ads = ad_detector.detect_ads(processed_video)
+            except Exception as e:
+                print(f"   [WARN] 广告检测跳过: {e}")
+            
             # ========== Step 1: 语音识别 ==========
-            report_progress(1, "识别视频中的对话...")
+            report_progress(1, "识别视频中的对话...", "这是最耗时的步骤，预计10-15分钟")
+            log("   [Step1] 开始语音识别...")
             
             from transcribe import transcribe_video
             srt_path = str(self.work_dir / "subtitles.srt")
-            segments, full_text = transcribe_video(processed_video, output_srt=srt_path)
+            # 传递media_type和title，优化中文识别质量
+            segments, full_text = transcribe_video(
+                processed_video, 
+                output_srt=srt_path,
+                media_type=media_type,
+                title=title
+            )
             
-            print(f"   ✓ 识别到 {len(segments)} 段对话")
+            log(f"   [Step1] 语音识别完成! 共 {len(segments)} 段对话")
             
             # ========== Step 2: 场景分析 ==========
-            report_progress(2, "分析视频场景...")
+            report_progress(2, "分析视频场景...", "包含剧情获取和场景检测")
+            log("   [Step2] 开始场景分析...")
             
             from scene_detect import detect_scenes
             from smart_importance import calculate_scene_importance
             from plot_fetcher import PlotFetcher
             
             # 获取剧情信息（电视剧：获取分集剧情）
+            log("   [Step2] 2.1 获取剧情信息...")
             plot_fetcher = PlotFetcher()
             plot_info = plot_fetcher.fetch(
                 title=title,
@@ -217,24 +254,27 @@ class VideoPipelineV5:
                 episode=episode
             )
             plot_fetcher.close()
+            log("   [Step2]     剧情获取完成")
             
             # 提取分集剧情（用于解说引擎）
             episode_plot = ""
             if media_type == "tv":
                 episode_plot = plot_info.get('episode_overview', '') or plot_info.get('overview', '')
                 if episode_plot:
-                    print(f"   [剧情] 第{episode}集剧情: {episode_plot[:80]}...")
+                    log(f"   [Step2]     第{episode}集剧情: {episode_plot[:60]}...")
                 else:
                     # 使用AI从字幕总结本集剧情
+                    log("   [Step2] 2.2 使用AI总结本集剧情...")
                     from plot_fetcher import summarize_plot_from_transcript
                     episode_plot = summarize_plot_from_transcript(full_text, segments)
                     if episode_plot:
-                        print(f"   [剧情] AI总结本集剧情: {episode_plot[:80]}...")
+                        log(f"   [Step2]     AI总结: {episode_plot[:60]}...")
             
             # 检测场景
+            log("   [Step2] 2.3 检测视频场景（可能需要1-2分钟）...")
             scenes_dir = str(self.work_dir / "scenes")
             raw_scenes, _ = detect_scenes(processed_video, scenes_dir)  # 解包元组
-            print(f"   检测到 {len(raw_scenes)} 个场景")
+            log(f"   [Step2]     检测到 {len(raw_scenes)} 个场景")
             
             # 计算重要性并关联对话
             analyzed_scenes = []
@@ -271,19 +311,22 @@ class VideoPipelineV5:
                     'importance': importance,
                 })
             
-            print(f"   ✓ 场景分析完成")
+            log(f"   [Step2]     场景分析完成")
             
             # ========== Step 3: 智能解说 ==========
-            report_progress(3, f"生成{style}风格解说（{media_type_cn}模式）...")
+            report_progress(3, f"生成{style}风格解说（{media_type_cn}模式）...", "使用AI生成解说文案")
+            log("   [Step3] 开始智能解说生成...")
             
             from narration_engine import NarrationEngine
             
             # 初始化解说引擎（传入媒体类型和集数）
+            log("   [Step3] 3.1 初始化解说引擎...")
             engine = NarrationEngine(
                 use_ai=True, 
                 media_type=media_type, 
                 episode=episode
             )
+            log("   [Step3] 3.2 分析场景并生成解说...")
             scene_segments, narration_text = engine.analyze_and_generate(
                 analyzed_scenes, 
                 title, 
@@ -292,6 +335,7 @@ class VideoPipelineV5:
             )
             
             # 转换为字典格式
+            log("   [Step3] 3.3 整理解说数据...")
             scenes_with_narration = []
             for seg in scene_segments:
                 scenes_with_narration.append({
@@ -306,23 +350,35 @@ class VideoPipelineV5:
                     'reason': seg.reason,
                 })
             
-            print(f"   ✓ 解说生成完成")
+            log(f"   [Step3]     解说生成完成! 共处理 {len(scenes_with_narration)} 个场景")
             
             # ========== Step 4: 时长控制 ==========
-            report_progress(4, "智能选择场景...")
+            report_progress(4, "智能选择场景...", "根据目标时长筛选最佳片段")
+            log("   [Step4] 开始时长控制...")
             
             from duration_controller import DurationController
             
+            log("   [Step4] 4.1 初始化时长控制器...")
             controller = DurationController(
                 min_duration=min_duration,
                 max_duration=max_duration,
                 original_ratio=0.3  # 至少30%原声
             )
             
+            log("   [Step4] 4.2 生成优化时间线...")
             timeline = controller.create_optimized_timeline(
                 scenes_with_narration,
                 target_duration=None  # 自动计算
             )
+            
+            # 过滤广告场景
+            if detected_ads:
+                try:
+                    log("   [Step4] 4.3 过滤广告场景...")
+                    from ad_detector import filter_ad_segments
+                    timeline = filter_ad_segments(timeline, detected_ads)
+                except Exception as e:
+                    log(f"   [Step4]     [WARN] 广告过滤跳过: {e}")
             
             # 过滤跳过的场景
             active_timeline = [t for t in timeline if t['audio_mode'] != 'skip']
@@ -332,40 +388,48 @@ class VideoPipelineV5:
             
             total_duration = sum(t['duration'] for t in active_timeline)
             
-            print(f"   ✓ 选择了 {len(active_timeline)} 个场景")
-            print(f"   预计时长: {total_duration:.0f}秒 ({total_duration/60:.1f}分钟)")
+            log(f"   [Step4]     选择了 {len(active_timeline)} 个场景")
+            log(f"   [Step4]     预计时长: {total_duration:.0f}秒 ({total_duration/60:.1f}分钟)")
             
             # 保存解说剧本
+            log("   [Step4] 4.4 保存解说剧本...")
             script_path = self.work_dir / "解说剧本_v5.txt"
             self._save_script(active_timeline, script_path, title, style)
             
             # ========== Step 5: TTS分段合成 ==========
-            report_progress(5, "分段合成解说配音...")
+            report_progress(5, "分段合成解说配音...", "使用Edge-TTS生成语音")
+            log("   [Step5] 开始TTS语音合成...")
             
             from tts_segmented import synthesize_timeline_narrations
             
             tts_dir = self.work_dir / "tts"
+            voiceover_count = sum(1 for t in active_timeline if t['audio_mode'] == 'voiceover')
+            log(f"   [Step5]     需要合成 {voiceover_count} 段解说音频...")
+            
             narration_segments = await synthesize_timeline_narrations(
                 active_timeline,
                 str(tts_dir)
             )
             
-            print(f"   ✓ 生成 {len(narration_segments)} 个解说音频")
+            log(f"   [Step5]     TTS合成完成! 生成 {len(narration_segments)} 个音频文件")
             
             # ========== Step 6: 片段处理 ==========
-            report_progress(6, "处理视频片段（原声/解说分开）...")
+            report_progress(6, "处理视频片段（原声/解说分开）...", "这可能需要几分钟")
+            log("   [Step6] 开始视频片段处理...")
             
             from clip_processor import process_timeline_clips, concat_processed_clips
             
             clips_dir = self.work_dir / "clips"
             
-            # 处理每个片段（关键改进：每个片段独立处理音频）
+            # 处理每个片段
+            log(f"   [Step6] 6.1 提取和处理 {len(active_timeline)} 个片段...")
             clip_files, clips_duration = process_timeline_clips(
                 source_video=processed_video,
                 timeline=active_timeline,
                 narration_segments=narration_segments,
                 output_dir=str(clips_dir)
             )
+            log(f"   [Step6]     提取完成! 共 {len(clip_files)} 个片段")
             
             # 拼接所有片段
             output_video = str(self.work_dir / f"{output_name}.mp4")
@@ -373,36 +437,41 @@ class VideoPipelineV5:
             if not clip_files:
                 raise ValueError("没有成功提取任何视频片段")
             
+            log(f"   [Step6] 6.2 拼接视频片段...")
             concat_success = concat_processed_clips(clip_files, output_video)
             if not concat_success:
                 raise RuntimeError("视频片段拼接失败")
             
-            print(f"   ✓ 视频处理完成")
+            log(f"   [Step6]     视频拼接完成!")
             
             # ========== Step 7: 输出成品 ==========
-            report_progress(7, "生成最终成品...")
+            report_progress(7, "生成最终成品...", "添加字幕和生成竖版")
+            log("   [Step7] 开始生成最终成品...")
             
             from audio_composer import add_subtitles, convert_to_vertical
             
             # 添加字幕
+            log("   [Step7] 7.1 添加字幕...")
             output_with_sub = str(self.work_dir / f"{output_name}_sub.mp4")
             add_subtitles(output_video, srt_path, output_with_sub)
             
             # 生成抖音版
+            log("   [Step7] 7.2 生成抖音竖版...")
             output_douyin = str(self.work_dir / f"{output_name}_抖音.mp4")
             convert_to_vertical(output_video, output_douyin)
+            log("   [Step7]     最终成品生成完成!")
             
             # 完成
             end_time = datetime.now()
             elapsed = (end_time - self.start_time).seconds
             
-            print("\n" + "★"*60)
-            print("★  ✅ v5.0 处理完成！")
-            print("★  ====================================================")
-            print(f"★  结束时间: {end_time.strftime('%Y-%m-%d %H:%M:%S')}")
-            print(f"★  总耗时: {elapsed//60}分{elapsed%60}秒")
-            print(f"★  输出文件: {output_video}")
-            print("★"*60 + "\n")
+            print("\n" + "*"*60)
+            print("*  [SUCCESS] v5.4 处理完成!")
+            print("*  ====================================================")
+            print(f"*  结束时间: {end_time.strftime('%Y-%m-%d %H:%M:%S')}")
+            print(f"*  总耗时: {elapsed//60}分{elapsed%60}秒")
+            print(f"*  输出文件: {output_video}")
+            print("*"*60 + "\n")
             
             # 统计
             orig_count = sum(1 for t in active_timeline if t['audio_mode'] == 'original')
@@ -468,7 +537,7 @@ class VideoPipelineV5:
         lines.append("")
         
         for i, item in enumerate(timeline, 1):
-            mode = "🔊原声" if item['audio_mode'] == 'original' else "🎙️解说"
+            mode = "[原声]" if item['audio_mode'] == 'original' else "[解说]"
             lines.append(f"【场景 {i}】 {mode}")
             lines.append(f"时间: {item['source_start']:.1f}s - {item['source_end']:.1f}s ({item['duration']:.1f}秒)")
             lines.append(f"重要性: {item['importance']:.2f}")

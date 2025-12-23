@@ -71,12 +71,12 @@ class GPUManager:
         """
         total_gb = cls.get_total_memory()
         
-        # 选择合适的配置档位
-        if total_gb >= 16:
+        # 选择合适的配置档位（使用0.5GB容差，避免7.99GB被判为<8GB）
+        if total_gb >= 15.5:
             config_key = 16
-        elif total_gb >= 12:
+        elif total_gb >= 11.5:
             config_key = 12
-        elif total_gb >= 8:
+        elif total_gb >= 7.5:  # RTX 4060 8GB 实际显示7.99GB
             config_key = 8
         else:
             config_key = 6

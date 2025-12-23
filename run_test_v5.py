@@ -1,16 +1,16 @@
-# run_test_v5.py - v5.1 测试脚本 (电影/电视剧分离版)
+# run_test_v5.py - v5.4 测试脚本 (带详细日志)
 """
-SmartVideoClipper v5.1 测试
+SmartVideoClipper v5.4 测试
 
-🎬 核心升级：电影与电视剧模式分离
-
-已修复的核心问题：
-1. ✅ 电影/电视剧模式分离（解说策略不同）
-2. ✅ 音频分段切换（每个片段独立处理）
-3. ✅ TTS分段生成（解说-画面精确对齐）
-4. ✅ 修复语音停顿问题
-5. ✅ 敏感词多层过滤
-6. ✅ GPU硬件加速
+v5.4 改进：
+1. [OK] TMDB API 剧情获取
+2. [OK] 确保60%解说比例（电视剧模式）
+3. [OK] 增强备用解说方案
+4. [OK] TTS卡顿修复
+5. [OK] 敏感词多层过滤
+6. [OK] GPU硬件加速
+7. [OK] 语音识别优化（initial_prompt解决乱码）
+8. [NEW] 详细日志输出（实时+文件）
 """
 
 import asyncio
@@ -26,8 +26,58 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "core"))
 
 
+# ========== 日志系统 ==========
+class TeeLogger:
+    """同时输出到控制台和文件的日志器（改进版）"""
+    def __init__(self, log_file):
+        self.terminal = sys.stdout
+        self.log_path = log_file
+        try:
+            self.log_file = open(log_file, 'w', encoding='utf-8', buffering=1)
+            print(f"[LOG] 日志文件创建成功: {log_file}")
+        except Exception as e:
+            print(f"[LOG] 日志文件创建失败: {e}")
+            self.log_file = None
+        
+    def write(self, message):
+        try:
+            # 先输出到终端
+            self.terminal.write(message)
+            self.terminal.flush()
+            # 再写入文件
+            if self.log_file:
+                # 处理可能的编码问题
+                safe_message = message.encode('utf-8', errors='replace').decode('utf-8')
+                self.log_file.write(safe_message)
+                self.log_file.flush()
+        except Exception:
+            pass
+        
+    def flush(self):
+        try:
+            self.terminal.flush()
+            if self.log_file:
+                self.log_file.flush()
+        except:
+            pass
+        
+    def close(self):
+        if self.log_file:
+            self.log_file.close()
+
+
 async def main():
-    print(f"\n[{datetime.now().strftime('%H:%M:%S')}] 启动 V5.1 测试（电视剧模式）...")
+    # 创建日志文件（使用ASCII安全的文件名）
+    log_filename = f"test_log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+    
+    print(f"[INIT] 正在创建日志文件: {log_filename}")
+    logger = TeeLogger(log_filename)
+    sys.stdout = logger
+    
+    print(f"\n{'='*60}")
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] SmartVideoClipper v5.4 测试")
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] 日志文件: {log_filename}")
+    print(f"{'='*60}")
     
     from core.pipeline_v5 import run_v5
     
@@ -37,7 +87,7 @@ async def main():
     title = "狂飙"
     style = "幽默"
     
-    # 🆕 媒体类型参数
+    # 媒体类型参数
     media_type = "tv"  # 电视剧模式：60%解说+40%原声
     episode = 1        # 第1集
     
@@ -50,6 +100,8 @@ async def main():
     print(f"   媒体类型: 电视剧")
     print(f"   当前集数: 第{episode}集")
     print(f"   解说策略: 讲述本集故事（60%解说+40%原声）")
+    print(f"   解说风格: {style}")
+    print(f"   时长范围: 3-15分钟")
     
     # 运行
     result = await run_v5(
@@ -59,29 +111,34 @@ async def main():
         style=style,
         min_duration=180,   # 最短3分钟
         max_duration=900,   # 最长15分钟
-        media_type=media_type,  # 🆕 电视剧模式
-        episode=episode         # 🆕 第1集
+        media_type=media_type,
+        episode=episode
     )
     
     # 输出结果
     print("\n" + "="*60)
     if result.get('success'):
-        print("✅ V5.0 处理完成！")
+        print("[SUCCESS] V5.4 处理完成!")
         print("="*60)
-        print(f"📁 工作目录: {result.get('work_dir')}")
-        print(f"🎬 横屏视频: {result.get('output_video')}")
-        print(f"📱 抖音视频: {result.get('output_douyin')}")
-        print(f"📝 解说剧本: {result.get('script_path')}")
-        print(f"📄 字幕文件: {result.get('subtitle_path')}")
-        print(f"⏱️ 视频时长: {result.get('duration', 0):.0f}秒")
-        print(f"🔊 原声场景: {result.get('original_scenes', 0)}个")
-        print(f"🎙️ 解说场景: {result.get('voiceover_scenes', 0)}个")
+        print(f"   工作目录: {result.get('work_dir')}")
+        print(f"   横屏视频: {result.get('output_video')}")
+        print(f"   抖音视频: {result.get('output_douyin')}")
+        print(f"   解说剧本: {result.get('script_path')}")
+        print(f"   字幕文件: {result.get('subtitle_path')}")
+        print(f"   视频时长: {result.get('duration', 0):.0f}秒")
+        print(f"   原声场景: {result.get('original_scenes', 0)}个")
+        print(f"   解说场景: {result.get('voiceover_scenes', 0)}个")
     else:
-        print("❌ 处理失败")
-        print(f"错误: {result.get('error')}")
+        print("[FAILED] 处理失败")
+        print(f"   错误: {result.get('error')}")
     print("="*60)
     
-    print(f"\n[{datetime.now().strftime('%H:%M:%S')}] 🏁 测试结束")
+    print(f"\n[{datetime.now().strftime('%H:%M:%S')}] 测试结束")
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] 日志已保存到: {log_filename}")
+    
+    # 关闭日志
+    sys.stdout = logger.terminal
+    logger.close()
 
 
 if __name__ == "__main__":

@@ -302,8 +302,21 @@ def _mix_audio_segments(
 
 
 def add_subtitles(video: str, subtitle: str, output: str) -> str:
-    """添加字幕（GPU加速）"""
+    """添加字幕（GPU加速，带详细日志）"""
+    import time
+    from datetime import datetime
+    
+    def log(msg):
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}", flush=True)
+    
+    log(f"[SUB] ========== 字幕添加开始 ==========")
+    log(f"[SUB] 输入视频: {video}")
+    log(f"[SUB] 字幕文件: {subtitle}")
+    
+    start_time = time.time()
+    
     if not os.path.exists(subtitle):
+        log(f"[SUB] [WARN] 字幕文件不存在，跳过")
         shutil.copy(video, output)
         return output
     
@@ -312,6 +325,7 @@ def add_subtitles(video: str, subtitle: str, output: str) -> str:
     
     # 获取GPU加速编码参数
     video_codec_args = get_video_codec_args('fast')
+    log(f"[SUB] 编码器: {video_codec_args[1] if len(video_codec_args) > 1 else 'unknown'}")
     
     cmd = [
         'ffmpeg', '-y',
@@ -323,21 +337,38 @@ def add_subtitles(video: str, subtitle: str, output: str) -> str:
         output
     ]
     
+    log(f"[SUB] 正在添加字幕...")
     result = subprocess.run(cmd, capture_output=True, encoding='utf-8', errors='ignore')
     
+    elapsed = time.time() - start_time
     if os.path.exists(output) and os.path.getsize(output) > 1000:
-        print(f"[OK] 字幕添加完成: {output}")
+        log(f"[SUB] ========== 字幕添加完成 ==========")
+        log(f"[SUB] 输出: {output}")
+        log(f"[SUB] 耗时: {elapsed:.1f}秒")
         return output
     else:
-        # 字幕添加失败，使用原视频
+        log(f"[SUB] [WARN] 字幕添加失败，使用原视频")
         shutil.copy(video, output)
         return output
 
 
 def convert_to_vertical(video: str, output: str) -> str:
-    """转换为竖屏（抖音格式，GPU加速）"""
+    """转换为竖屏（抖音格式，GPU加速，带详细日志）"""
+    import time
+    from datetime import datetime
+    
+    def log(msg):
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}", flush=True)
+    
+    log(f"[VERT] ========== 竖屏转换开始 ==========")
+    log(f"[VERT] 输入视频: {video}")
+    log(f"[VERT] 目标尺寸: 1080x1920 (抖音格式)")
+    
+    start_time = time.time()
+    
     # 获取GPU加速编码参数
     video_codec_args = get_video_codec_args('fast')
+    log(f"[VERT] 编码器: {video_codec_args[1] if len(video_codec_args) > 1 else 'unknown'}")
     
     cmd = [
         'ffmpeg', '-y',
@@ -349,12 +380,17 @@ def convert_to_vertical(video: str, output: str) -> str:
         output
     ]
     
+    log(f"[VERT] 正在转换...")
     result = subprocess.run(cmd, capture_output=True, encoding='utf-8', errors='ignore')
     
+    elapsed = time.time() - start_time
     if os.path.exists(output) and os.path.getsize(output) > 1000:
-        print(f"[OK] 竖屏转换完成: {output}")
+        log(f"[VERT] ========== 竖屏转换完成 ==========")
+        log(f"[VERT] 输出: {output}")
+        log(f"[VERT] 耗时: {elapsed:.1f}秒")
         return output
     else:
+        log(f"[VERT] [WARN] 竖屏转换失败")
         return video
 
 
