@@ -1,16 +1,19 @@
-# core/narration_engine.py - 解说引擎 v5.5 (批量生成优化版)
+# core/narration_engine.py - 解说引擎 v5.6 (分层生成+上下文感知版)
 """
-SmartVideoClipper - 智能解说引擎 v5.5
+SmartVideoClipper - 智能解说引擎 v5.6
 
-v5.5 核心改进（基于实测数据）：
-1. 批量生成解说：10个场景/批次，速度提升5.8倍，成功率100%
-2. 移除模板：不再使用本地模板，全部AI生成
-3. num_predict=2000：确保thinking模式完整输出
-4. 智能备用：AI总结对话，非模板
+v5.6 核心改进：
+1. 分层生成：先生成故事框架，再按框架生成场景解说
+2. 上下文窗口：每个场景考虑前2后2场景
+3. 动态比例：根据场景特征自动计算解说比例(30%-75%)
+4. 静音处理：检测并通过AI扩展填充静音段落
+5. 钩子开场：自动生成吸引人的开场白
+6. 悬念结尾：自动生成引发期待的结尾
 
-实测数据（qwen3:8b）：
-- 单次×608：102秒/10个，成功率50%
-- 批量×61：18秒/10个，成功率100%
+v5.5基础保留：
+- 批量生成解说（10场景/批）
+- 移除模板，全部AI生成
+- num_predict=2000确保完整输出
 
 三种音频模式：
 - [ORIGINAL] 原声场景：精彩对话、情感爆发、动作高潮
@@ -37,6 +40,16 @@ except ImportError:
     TV_VOICEOVER_RATIO = 0.60
     MOVIE_VOICEOVER_RATIO = 0.40
     MIN_ORIGINAL_RATIO = 0.25
+
+# v5.6新增：导入新模块
+try:
+    from core.story_framework import StoryFrameworkGenerator, FrameworkSegment
+    from core.dynamic_ratio import DynamicRatioCalculator, calculate_optimal_ratio
+    from core.silence_handler import SilenceHandler
+    from core.hook_generator import HookGenerator
+    MODULES_V56_AVAILABLE = True
+except ImportError:
+    MODULES_V56_AVAILABLE = False
 
 # 敏感词列表
 SENSITIVE_WORDS = [
@@ -89,21 +102,24 @@ class SceneSegment:
 
 class NarrationEngine:
     """
-    智能解说引擎 v5.5 (批量生成优化版)
+    智能解说引擎 v5.6 (分层生成+上下文感知版)
     
     核心职责：
-    1. 根据媒体类型（电影/电视剧）选择不同策略
-    2. 分析场景，决定原声/解说/跳过
-    3. 批量生成高质量解说（10场景/批，成功率100%）
-    4. 确保达到目标解说比例
+    1. 生成故事框架（分层生成第1层）
+    2. 根据框架+上下文生成场景解说（第2层）
+    3. 动态计算解说比例（替代固定60%）
+    4. 检测并处理静音段落
+    5. 生成钩子开场和悬念结尾
     
-    v5.5改进（基于实测）：
-    - 批量生成速度提升5.8倍
-    - 成功率从50%提升到100%
-    - 移除模板，全部AI生成
+    v5.6改进：
+    - 分层生成：框架→解说
+    - 上下文窗口：前2后2场景
+    - 动态比例：30%-75%自动计算
+    - 静音处理：AI扩展填充
+    - 钩子+悬念：自动生成
     """
     
-    def __init__(self, use_ai: bool = True, media_type: str = "tv", episode: int = 1):
+    def __init__(self, use_ai: bool = True, media_type: str = "tv", episode: int = 1, total_episodes: int = 1):
         """
         初始化解说引擎
         
@@ -111,24 +127,34 @@ class NarrationEngine:
             use_ai: 是否使用AI生成
             media_type: 媒体类型 ("tv" 电视剧, "movie" 电影)
             episode: 集数/部数
+            total_episodes: 总集数
         """
         self.use_ai = use_ai
         self.llm_model = None
         self.media_type = media_type
         self.episode = episode
+        self.total_episodes = total_episodes
         self.episode_plot = ""  # 分集剧情
+        self.title = ""  # 作品名称
+        self.main_character = ""  # 主角名称
         
-        # 根据媒体类型设置目标比例
-        if media_type == "tv":
-            self.voiceover_ratio = TV_VOICEOVER_RATIO  # 60%解说
-            self.min_original_ratio = MIN_ORIGINAL_RATIO  # 25%原声
-        else:
-            self.voiceover_ratio = MOVIE_VOICEOVER_RATIO  # 40%解说
-            self.min_original_ratio = 0.45  # 45%原声
+        # v5.6新增：故事框架
+        self.story_framework = []
+        
+        # v5.6新增：钩子和结尾
+        self.hook_opening = ""
+        self.suspense_ending = ""
+        
+        # 动态比例（v5.6改进：不再固定）
+        self.voiceover_ratio = 0.55  # 默认值，会被动态计算覆盖
+        self.min_original_ratio = MIN_ORIGINAL_RATIO
         
         # 尝试加载LLM
         if use_ai:
             self._init_llm()
+        
+        # v5.6新增：初始化子模块
+        self._init_v56_modules()
     
     def _init_llm(self):
         """初始化LLM模型"""
@@ -159,26 +185,56 @@ class NarrationEngine:
             print(f"[LLM] 初始化失败: {e}")
             self.llm_model = None
     
+    def _init_v56_modules(self):
+        """v5.6新增：初始化子模块"""
+        self.framework_generator = None
+        self.ratio_calculator = None
+        self.silence_handler = None
+        self.hook_generator = None
+        
+        if not MODULES_V56_AVAILABLE:
+            print("[Engine] v5.6模块未加载，使用兼容模式")
+            return
+        
+        try:
+            # 故事框架生成器
+            self.framework_generator = StoryFrameworkGenerator(self.llm_model)
+            
+            # 动态比例计算器
+            self.ratio_calculator = DynamicRatioCalculator(self.media_type)
+            
+            # 静音处理器
+            self.silence_handler = SilenceHandler(self.llm_model)
+            
+            # 钩子生成器
+            self.hook_generator = HookGenerator(self.llm_model)
+            
+            print("[Engine] v5.6模块初始化成功")
+        except Exception as e:
+            print(f"[Engine] v5.6模块初始化异常: {e}")
+    
     def analyze_and_generate(
         self,
         scenes: List[Dict],
         title: str = "",
         style: str = "幽默",
-        episode_plot: str = ""
+        episode_plot: str = "",
+        main_character: str = ""
     ) -> Tuple[List[SceneSegment], str]:
         """
-        分析场景并生成解说
+        分析场景并生成解说 v5.6
         
         参数：
             scenes: 场景列表
             title: 作品名称
             style: 解说风格
             episode_plot: 分集剧情
+            main_character: 主角名称
         
         返回：(处理后的场景列表, 完整解说文本)
         """
         print("\n" + "="*60)
-        print("[Engine] 智能解说引擎 v5.5 (批量生成优化版)")
+        print("[Engine] 智能解说引擎 v5.6 (分层生成+上下文感知版)")
         print("="*60)
         print(f"   作品: {title}")
         print(f"   类型: {'电视剧' if self.media_type == 'tv' else '电影'}")
@@ -186,32 +242,68 @@ class NarrationEngine:
             print(f"   集数: 第{self.episode}集")
         print(f"   风格: {style}")
         print(f"   场景数: {len(scenes)}")
-        print(f"   目标解说比例: {self.voiceover_ratio*100:.0f}%")
+        print(f"   v5.6模块: {'已加载' if MODULES_V56_AVAILABLE else '未加载'}")
         print("="*60)
         
-        # 保存分集剧情
+        # 保存基本信息
         self.episode_plot = episode_plot
+        self.title = title
+        self.main_character = main_character
         
         # Step 1: 理解整体剧情
         print("\n[Step 1] 理解剧情脉络...")
         plot_summary = self._understand_plot(scenes)
         print(f"   剧情概要: {plot_summary[:100]}...")
         
-        # Step 2: 标记场景类型（使用更宽松的阈值）
+        # Step 1.5 [v5.6新增]: 生成故事框架
+        if self.framework_generator:
+            print("\n[Step 1.5] 生成故事框架 (v5.6)...")
+            self.story_framework = self.framework_generator.generate_framework(
+                title=title,
+                media_type=self.media_type,
+                episode=self.episode,
+                plot_summary=plot_summary,
+                scenes=scenes,
+                total_episodes=self.total_episodes
+            )
+            print(f"   框架段落: {len(self.story_framework)}个")
+        
+        # Step 1.6 [v5.6新增]: 计算动态解说比例
+        if self.ratio_calculator:
+            print("\n[Step 1.6] 计算动态解说比例 (v5.6)...")
+            self.voiceover_ratio, ratio_details = self.ratio_calculator.calculate_global_ratio(scenes)
+            print(f"   动态比例: {self.voiceover_ratio*100:.0f}% (范围30%-75%)")
+            if ratio_details.get('adjustments'):
+                for adj in ratio_details['adjustments'][:3]:
+                    print(f"      - {adj}")
+        else:
+            print(f"   目标解说比例: {self.voiceover_ratio*100:.0f}% (固定)")
+        
+        # Step 2: 标记场景类型
         print("\n[Step 2] 分析场景类型...")
         marked_scenes = self._mark_scenes(scenes)
         
-        # Step 3: 生成解说（使用增强备用方案）
-        print("\n[Step 3] 生成解说文案...")
-        final_scenes = self._generate_narrations(marked_scenes, plot_summary, style)
+        # Step 3: 生成解说（v5.6增强：上下文窗口）
+        print("\n[Step 3] 生成解说文案 (v5.6上下文感知)...")
+        final_scenes = self._generate_narrations_v56(marked_scenes, scenes, plot_summary, style)
         
         # Step 4: 确保达到目标比例
         print("\n[Step 4] 调整解说比例...")
         final_scenes = self._ensure_voiceover_ratio(final_scenes)
         
+        # Step 4.5 [v5.6新增]: 处理静音段落
+        if self.silence_handler:
+            print("\n[Step 4.5] 处理静音段落 (v5.6)...")
+            final_scenes = self._process_silence_gaps(final_scenes, plot_summary, style)
+        
         # Step 5: 优化连贯性
         print("\n[Step 5] 优化剧情连贯性...")
         final_scenes = self._optimize_continuity(final_scenes)
+        
+        # Step 5.5 [v5.6新增]: 生成钩子开场和悬念结尾
+        if self.hook_generator:
+            print("\n[Step 5.5] 生成钩子开场和悬念结尾 (v5.6)...")
+            self._generate_hook_and_ending(plot_summary, style, len(scenes))
         
         # 统计
         original_count = sum(1 for s in final_scenes if s.audio_mode == AudioMode.ORIGINAL)
@@ -442,6 +534,337 @@ class NarrationEngine:
         log(f"[Narration] 平均速度: {voiceover_count/total_time:.1f}个/秒")
         
         return scenes
+    
+    def _generate_narrations_v56(
+        self, 
+        marked_scenes: List[SceneSegment],
+        original_scenes: List[Dict],
+        plot_summary: str,
+        style: str
+    ) -> List[SceneSegment]:
+        """
+        v5.6增强版解说生成（带上下文窗口）
+        
+        改进：
+        1. 每个场景考虑前2后2场景的上下文
+        2. 使用故事框架指导生成
+        3. 计算目标字数以匹配场景时长
+        """
+        import time
+        from datetime import datetime
+        
+        def log(msg):
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}", flush=True)
+        
+        # 收集需要解说的场景
+        voiceover_scenes = [s for s in marked_scenes if s.audio_mode == AudioMode.VOICEOVER]
+        voiceover_count = len(voiceover_scenes)
+        
+        if voiceover_count == 0:
+            log("[Narration] 无需生成解说")
+            return marked_scenes
+        
+        start_time = time.time()
+        batch_size = 10
+        batch_count = (voiceover_count + batch_size - 1) // batch_size
+        
+        log(f"[Narration] ========== v5.6批量生成 (上下文感知) ==========")
+        log(f"[Narration] 场景总数: {voiceover_count}")
+        log(f"[Narration] 批次数量: {batch_count}")
+        log(f"[Narration] 故事框架: {len(self.story_framework)}段")
+        
+        generated = 0
+        fallback_used = 0
+        failed = 0
+        
+        # 构建场景ID到索引的映射
+        scene_idx_map = {s.scene_id: i for i, s in enumerate(marked_scenes)}
+        
+        # 分批处理
+        for batch_idx in range(batch_count):
+            batch_start = batch_idx * batch_size
+            batch_end = min(batch_start + batch_size, voiceover_count)
+            batch_scenes = voiceover_scenes[batch_start:batch_end]
+            
+            elapsed = time.time() - start_time
+            log(f"[Narration] 批次 {batch_idx+1}/{batch_count} | "
+                f"场景 {batch_start+1}-{batch_end}/{voiceover_count} | "
+                f"耗时: {elapsed:.0f}秒")
+            
+            # v5.6改进：构建带上下文的批量请求
+            if self.llm_model:
+                narrations = self._batch_generate_with_context(
+                    batch_scenes, marked_scenes, original_scenes,
+                    plot_summary, style
+                )
+            else:
+                narrations = []
+            
+            # 分配结果
+            for i, scene in enumerate(batch_scenes):
+                if i < len(narrations) and narrations[i]:
+                    narration = narrations[i]
+                    if len(narration) >= 5 and not self._is_low_quality(narration):
+                        scene.narration = narration
+                        generated += 1
+                        continue
+                
+                # 备用：AI总结对话
+                fallback = self._ai_summarize_dialogue(scene.dialogue)
+                if fallback and len(fallback) >= 5:
+                    scene.narration = fallback
+                    fallback_used += 1
+                else:
+                    scene.audio_mode = AudioMode.ORIGINAL
+                    scene.reason = "AI生成失败,改用原声"
+                    failed += 1
+        
+        total_time = time.time() - start_time
+        success_rate = (generated + fallback_used) / voiceover_count * 100 if voiceover_count > 0 else 0
+        
+        log(f"[Narration] ========== 生成完成 ==========")
+        log(f"[Narration] 批量成功: {generated} ({generated*100//max(1,voiceover_count)}%)")
+        log(f"[Narration] AI总结: {fallback_used}")
+        log(f"[Narration] 失败转原声: {failed}")
+        log(f"[Narration] 总成功率: {success_rate:.1f}%")
+        log(f"[Narration] 总耗时: {total_time:.1f}秒")
+        
+        return marked_scenes
+    
+    def _batch_generate_with_context(
+        self,
+        batch_scenes: List[SceneSegment],
+        all_scenes: List[SceneSegment],
+        original_scenes: List[Dict],
+        plot_summary: str,
+        style: str
+    ) -> List[str]:
+        """
+        v5.6：带上下文窗口的批量生成
+        
+        每个场景包含：
+        - 对应的故事框架段落
+        - 前2个场景摘要
+        - 后2个场景摘要
+        - 目标字数
+        """
+        if not self.llm_model:
+            return []
+        
+        try:
+            import ollama
+            
+            # 构建场景ID到索引的映射
+            scene_id_to_idx = {s.scene_id: i for i, s in enumerate(all_scenes)}
+            
+            # 构建批量prompt
+            scene_list = []
+            for i, scene in enumerate(batch_scenes):
+                scene_idx = scene_id_to_idx.get(scene.scene_id, 0)
+                
+                # 获取框架指导
+                framework_hint = ""
+                if self.story_framework and self.framework_generator:
+                    segment = self.framework_generator.get_segment_for_scene(
+                        scene.scene_id, self.story_framework
+                    )
+                    if segment:
+                        framework_hint = f"[{segment.theme}|{segment.emotion}] "
+                
+                # 获取前后场景（上下文窗口）
+                context_parts = []
+                
+                # 前2个场景
+                for offset in [-2, -1]:
+                    prev_idx = scene_idx + offset
+                    if 0 <= prev_idx < len(all_scenes):
+                        prev_scene = all_scenes[prev_idx]
+                        prev_dialogue = prev_scene.dialogue[:30] if prev_scene.dialogue else "(无)"
+                        context_parts.append(f"前{-offset}:{prev_dialogue}")
+                
+                # 当前对话
+                dialogue = scene.dialogue[:80] if scene.dialogue else "(无对话)"
+                
+                # 后2个场景
+                for offset in [1, 2]:
+                    next_idx = scene_idx + offset
+                    if next_idx < len(all_scenes):
+                        next_scene = all_scenes[next_idx]
+                        next_dialogue = next_scene.dialogue[:30] if next_scene.dialogue else "(无)"
+                        context_parts.append(f"后{offset}:{next_dialogue}")
+                
+                # 计算目标字数
+                target_chars = int(scene.duration * 4)  # 4字/秒
+                target_chars = max(15, min(50, target_chars))
+                
+                # 构建场景描述
+                context_str = " | ".join(context_parts) if context_parts else ""
+                scene_desc = f"{i+1}. {framework_hint}[{target_chars}字] {dialogue}"
+                if context_str:
+                    scene_desc += f" (上下文:{context_str})"
+                
+                scene_list.append(scene_desc)
+            
+            scenes_text = "\n".join(scene_list)
+            
+            prompt = f"""为以下{len(batch_scenes)}个场景各生成一句{style}解说。
+
+剧情背景：{plot_summary[:150]}
+
+场景列表（含上下文和目标字数）：
+{scenes_text}
+
+要求：
+1. 每句解说按[目标字数]生成
+2. {style}风格
+3. 结合上下文，承上启下
+4. 不要复述对话原文
+5. 直接输出JSON数组格式
+
+输出格式：["解说1", "解说2", ...]"""
+            
+            response = ollama.chat(
+                model=self.llm_model,
+                messages=[{'role': 'user', 'content': prompt}],
+                options={
+                    'num_predict': 2000,
+                    'temperature': 0.6,
+                }
+            )
+            
+            # 提取内容
+            msg = response.get('message', {})
+            content = ""
+            
+            if hasattr(msg, 'content') and msg.content:
+                content = msg.content.strip()
+            elif hasattr(msg, 'thinking') and msg.thinking:
+                content = msg.thinking.strip()
+            
+            if not content:
+                return []
+            
+            # 解析JSON数组
+            import json
+            match = re.search(r'\[.*?\]', content, re.DOTALL)
+            if match:
+                try:
+                    results = json.loads(match.group())
+                    if isinstance(results, list):
+                        cleaned = []
+                        for r in results:
+                            if isinstance(r, str):
+                                r = r.strip().strip('"\'')
+                                r = re.sub(r'^[\d]+[\.、]\s*', '', r)
+                                cleaned.append(r)
+                            else:
+                                cleaned.append("")
+                        return cleaned
+                except json.JSONDecodeError:
+                    pass
+            
+            # JSON解析失败，尝试按行分割
+            lines = content.split('\n')
+            results = []
+            for line in lines:
+                line = line.strip()
+                line = re.sub(r'^[\d]+[\.、\)）]\s*', '', line)
+                line = line.strip('"\'[]')
+                if line and len(line) > 5 and len(line) < 60:
+                    results.append(line)
+            
+            return results[:len(batch_scenes)]
+            
+        except Exception as e:
+            print(f"[Narration] v5.6批量生成异常: {e}", flush=True)
+            # 降级到v5.5方法
+            return self._batch_generate_narrations(batch_scenes, plot_summary, style)
+    
+    def _process_silence_gaps(
+        self,
+        scenes: List[SceneSegment],
+        plot_summary: str,
+        style: str
+    ) -> List[SceneSegment]:
+        """
+        v5.6新增：处理静音段落
+        """
+        if not self.silence_handler:
+            return scenes
+        
+        # 转换为dict格式
+        scene_dicts = []
+        for s in scenes:
+            scene_dicts.append({
+                'scene_id': s.scene_id,
+                'start_time': s.start_time,
+                'end_time': s.end_time,
+                'audio_mode': s.audio_mode.value,
+                'narration': s.narration,
+                'dialogue': s.dialogue,
+                'emotion': s.emotion,
+            })
+        
+        # 检测静音
+        gaps = self.silence_handler.detect_silence_gaps(scene_dicts)
+        
+        if not gaps:
+            print("   无静音段落")
+            return scenes
+        
+        print(f"   检测到静音: {len(gaps)}处")
+        
+        # 处理静音
+        gaps, expanded, adjusted = self.silence_handler.process_silence_gaps(
+            gaps, scene_dicts, plot_summary, style
+        )
+        
+        # 应用结果
+        gap_map = {g.scene_id: g for g in gaps}
+        for scene in scenes:
+            if scene.scene_id in gap_map:
+                gap = gap_map[scene.scene_id]
+                if gap.expanded_narration:
+                    scene.narration = gap.expanded_narration
+        
+        print(f"   AI扩展: {expanded}, 语速调整: {adjusted}")
+        
+        return scenes
+    
+    def _generate_hook_and_ending(self, plot_summary: str, style: str, total_scenes: int):
+        """
+        v5.6新增：生成钩子开场和悬念结尾
+        """
+        if not self.hook_generator:
+            return
+        
+        # 生成钩子开场
+        if self.hook_generator.should_add_hook(self.media_type, self.episode, self.total_episodes):
+            duration_minutes = total_scenes * 5 // 60  # 粗略估算
+            self.hook_opening = self.hook_generator.generate_hook(
+                title=self.title,
+                plot_summary=plot_summary,
+                main_character=self.main_character,
+                style=style,
+                duration_minutes=max(5, duration_minutes)
+            )
+            print(f"   钩子开场: {self.hook_opening[:40]}...")
+        
+        # 生成悬念结尾
+        should_add, ending_type = self.hook_generator.should_add_suspense(
+            self.media_type, self.episode, self.total_episodes
+        )
+        if should_add:
+            has_next = self.episode < self.total_episodes
+            self.suspense_ending = self.hook_generator.generate_ending(
+                title=self.title,
+                plot_summary=plot_summary,
+                ending_type=ending_type,
+                main_character=self.main_character,
+                style=style,
+                has_next_episode=has_next
+            )
+            print(f"   {ending_type}结尾: {self.suspense_ending[:40]}...")
     
     def _batch_generate_narrations(
         self, 
@@ -837,11 +1260,24 @@ class NarrationEngine:
         return scenes
     
     def _compile_narration_text(self, scenes: List[SceneSegment]) -> str:
-        """编译完整解说文本"""
+        """编译完整解说文本（v5.6增强：包含钩子和结尾）"""
         narrations = []
+        
+        # v5.6：添加钩子开场
+        if self.hook_opening:
+            narrations.append(f"[开场] {self.hook_opening}")
+            narrations.append("")  # 空行分隔
+        
+        # 主体解说
         for scene in scenes:
             if scene.audio_mode == AudioMode.VOICEOVER and scene.narration:
                 narrations.append(scene.narration)
+        
+        # v5.6：添加悬念结尾
+        if self.suspense_ending:
+            narrations.append("")  # 空行分隔
+            narrations.append(f"[结尾] {self.suspense_ending}")
+        
         return "\n".join(narrations)
     
     def _filter_sensitive(self, text: str) -> str:

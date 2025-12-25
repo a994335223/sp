@@ -1,23 +1,29 @@
-# core/pipeline_v5.py - 智能视频剪辑流水线 v5.4 (语音识别优化版)
+# core/pipeline_v5.py - 智能视频剪辑流水线 v5.6 (分层生成+上下文感知版)
 """
-SmartVideoClipper v5.4 - 全球第一的智能视频解说
+SmartVideoClipper v5.6 - 全球第一的智能视频解说
 
-v5.4 优化：
-1. [OK] 修复模板文字问题（删除"情节推进中"等垃圾内容）
-2. [OK] 重构解说生成逻辑（AI概括而非截断对话）
-3. [OK] 添加广告检测（检测中间插入广告）
-4. [OK] 修复解说重复问题（检测连续相似内容）
-5. [OK] 优化TTS平滑处理（音频淡入淡出）
-6. [OK] 合并相邻短场景（减少TTS碎片化）
-7. [NEW] 语音识别优化（initial_prompt解决中文乱码）
+v5.6 核心改进：
+1. [NEW] 分层生成 - 先生成故事框架，再按框架生成解说
+2. [NEW] 上下文窗口 - 每个场景考虑前2后2场景
+3. [NEW] 动态比例 - 根据场景特征自动计算解说比例(30%-75%)
+4. [NEW] 静音处理 - 检测并AI扩展填充静音段落
+5. [NEW] 钩子开场 - 自动生成吸引人的开场白
+6. [NEW] 悬念结尾 - 自动生成引发期待的结尾
+7. [NEW] 动态语速 - TTS支持0.85x-1.15x语速调整
+
+v5.4 基础保留：
+- 批量解说生成（10场景/批）
+- 广告检测和过滤
+- 统一编码参数
+- 语音识别优化
 
 处理流程：
 Step 0: 预处理（去片头片尾 + 广告检测）
 Step 1: 语音识别（获取对话）
 Step 2: 场景分析（标记精彩/过渡）
-Step 3: 智能解说（生成文案）
-Step 4: 时长控制（选择场景 + 合并短场景）
-Step 5: TTS分段合成（带淡入淡出）
+Step 3: 智能解说（分层生成 + 上下文感知）
+Step 4: 时长控制（动态比例 + 静音处理）
+Step 5: TTS分段合成（动态语速）
 Step 6: 片段处理（原声/解说分开）
 Step 7: 输出成品
 """
@@ -313,32 +319,53 @@ class VideoPipelineV5:
             
             log(f"   [Step2]     场景分析完成")
             
-            # ========== Step 3: 智能解说 ==========
-            report_progress(3, f"生成{style}风格解说（{media_type_cn}模式）...", "使用AI生成解说文案")
-            log("   [Step3] 开始智能解说生成...")
+            # ========== Step 3: 智能解说 (v5.6分层生成) ==========
+            report_progress(3, f"生成{style}风格解说（v5.6分层模式）...", "分层生成 + 上下文感知")
+            log("   [Step3] 开始智能解说生成 v5.6...")
             
             from narration_engine import NarrationEngine
             
-            # 初始化解说引擎（传入媒体类型和集数）
-            log("   [Step3] 3.1 初始化解说引擎...")
+            # v5.6: 初始化解说引擎（传入总集数用于悬念结尾判断）
+            log("   [Step3] 3.1 初始化解说引擎 v5.6...")
+            total_episodes = 1  # 默认1集，可从外部传入
             engine = NarrationEngine(
                 use_ai=True, 
                 media_type=media_type, 
-                episode=episode
+                episode=episode,
+                total_episodes=total_episodes  # v5.6新增
             )
-            log("   [Step3] 3.2 分析场景并生成解说...")
+            
+            log("   [Step3] 3.2 分层生成解说 (框架→场景→上下文)...")
+            # v5.6: 传入main_character参数
+            main_character = ""  # 可从剧情中提取
+            if episode_plot:
+                # 简单提取：找到第一个出现的人名
+                import re
+                name_match = re.search(r'([高李王张刘陈][^\s，。]{0,2})', episode_plot)
+                if name_match:
+                    main_character = name_match.group(1)
+            
             scene_segments, narration_text = engine.analyze_and_generate(
                 analyzed_scenes, 
                 title, 
                 style,
-                episode_plot=episode_plot  # 传入分集剧情
+                episode_plot=episode_plot,
+                main_character=main_character  # v5.6新增
             )
+            
+            # v5.6: 获取钩子开场和悬念结尾
+            hook_opening = getattr(engine, 'hook_opening', '')
+            suspense_ending = getattr(engine, 'suspense_ending', '')
+            if hook_opening:
+                log(f"   [Step3]     钩子开场: {hook_opening[:40]}...")
+            if suspense_ending:
+                log(f"   [Step3]     悬念结尾: {suspense_ending[:40]}...")
             
             # 转换为字典格式
             log("   [Step3] 3.3 整理解说数据...")
             scenes_with_narration = []
             for seg in scene_segments:
-                scenes_with_narration.append({
+                scene_dict = {
                     'scene_id': seg.scene_id,
                     'start_time': seg.start_time,
                     'end_time': seg.end_time,
@@ -348,7 +375,11 @@ class VideoPipelineV5:
                     'importance': seg.importance,
                     'emotion': seg.emotion,
                     'reason': seg.reason,
-                })
+                }
+                # v5.6: 传递speech_rate（如果有）
+                if hasattr(seg, 'speech_rate'):
+                    scene_dict['speech_rate'] = seg.speech_rate
+                scenes_with_narration.append(scene_dict)
             
             log(f"   [Step3]     解说生成完成! 共处理 {len(scenes_with_narration)} 个场景")
             

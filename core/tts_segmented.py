@@ -1,16 +1,20 @@
-# core/tts_segmented.py - 分段TTS合成器 v5.3
+# core/tts_segmented.py - 分段TTS合成器 v5.6
 """
-SmartVideoClipper - 分段语音合成 v5.3 (全球最优版)
+SmartVideoClipper - 分段语音合成 v5.6 (动态语速版)
 
 核心原则：
 每个解说场景单独生成一个音频文件！
 
-v5.3 核心改进：
+v5.6 核心改进：
+1. 动态语速控制：支持0.85x-1.15x语速调整
+2. 情感语速适配：悲伤放慢、愤怒加速
+3. 静音填充配合：根据scene的speech_rate调整
+
+v5.3 基础保留：
 1. 修复语音卡顿问题（优化文本预处理）
 2. 简化音频后处理（减少过度处理）
-3. 更稳定的语速控制
-4. 更短的淡入淡出（0.03秒）
-5. 更好的错误恢复机制
+3. 更短的淡入淡出（0.03秒）
+4. 更好的错误恢复机制
 """
 
 import os
@@ -36,11 +40,15 @@ except ImportError:
 
 class SegmentedTTS:
     """
-    分段TTS合成器 v5.3
+    分段TTS合成器 v5.6
     
     每个解说场景生成独立的音频文件
-    优化文本处理，减少卡顿
+    支持动态语速控制
     """
+    
+    # v5.6: 动态语速范围
+    MIN_SPEED = 0.85
+    MAX_SPEED = 1.15
     
     def __init__(self, voice: str = None):
         """
@@ -55,10 +63,10 @@ class SegmentedTTS:
         self.rate = TTS_RATE
         self.fade_duration = TTS_FADE_DURATION
         
-        print(f"[TTS] 分段合成器 v5.3 初始化")
+        print(f"[TTS] 分段合成器 v5.6 初始化 (动态语速版)")
         print(f"      语音: {self.voice}")
-        print(f"      语速: {self.rate}")
-        print(f"      淡入淡出: {self.fade_duration}秒")
+        print(f"      基础语速: {self.rate}")
+        print(f"      动态语速范围: {self.MIN_SPEED}x - {self.MAX_SPEED}x")
     
     def _optimize_text_for_tts(self, text: str) -> str:
         """
@@ -132,7 +140,15 @@ class SegmentedTTS:
         target_durations: List[float] = None
     ) -> List[Dict]:
         """
-        为每个解说段落生成音频（带详细日志）
+        为每个解说段落生成音频 v5.6（支持动态语速）
+        
+        参数：
+            segments: 解说段落列表，每项包含：
+                - text: 解说文本
+                - scene_id: 场景ID
+                - speech_rate: (可选) 动态语速 0.85-1.15
+                - emotion: (可选) 情感，用于语速调整
+            target_durations: 目标时长列表
         """
         import time
         from datetime import datetime
@@ -143,10 +159,15 @@ class SegmentedTTS:
         os.makedirs(output_dir, exist_ok=True)
         
         start_time = time.time()
-        log(f"[TTS] ========== TTS语音合成开始 ==========")
+        log(f"[TTS] ========== TTS语音合成开始 v5.6 ==========")
         log(f"[TTS] 待合成片段: {len(segments)} 个")
         log(f"[TTS] 输出目录: {output_dir}")
         log(f"[TTS] 语音: {self.voice}")
+        
+        # v5.6: 统计动态语速使用情况
+        dynamic_rate_count = sum(1 for s in segments if s.get('speech_rate', 1.0) != 1.0)
+        if dynamic_rate_count > 0:
+            log(f"[TTS] 动态语速片段: {dynamic_rate_count} 个")
         
         results = []
         success_count = 0
@@ -166,9 +187,14 @@ class SegmentedTTS:
             if target_durations and i < len(target_durations):
                 target_duration = target_durations[i]
             
-            # 合成音频
+            # v5.6: 获取动态语速
+            speech_rate = seg.get('speech_rate', 1.0)
+            emotion = seg.get('emotion', 'neutral')
+            
+            # 合成音频（传入动态语速参数）
             success, duration = await self._synthesize_single(
-                text, audio_path, target_duration
+                text, audio_path, target_duration,
+                speech_rate=speech_rate, emotion=emotion
             )
             
             if success:
@@ -178,6 +204,7 @@ class SegmentedTTS:
                     'scene_id': scene_id,
                     'text': text,
                     'start': 0,
+                    'speech_rate': speech_rate,  # v5.6: 记录使用的语速
                 })
                 success_count += 1
             else:
@@ -203,12 +230,20 @@ class SegmentedTTS:
         text: str,
         output_path: str,
         target_duration: float = None,
-        max_retries: int = 3
+        max_retries: int = 3,
+        speech_rate: float = 1.0,
+        emotion: str = 'neutral'
     ) -> Tuple[bool, float]:
         """
-        合成单个音频 v5.3
+        合成单个音频 v5.6
         
-        改进：简化后处理流程，减少过度处理
+        v5.6改进：
+        - 支持动态语速 (0.85-1.15)
+        - 情感语速适配
+        
+        参数：
+            speech_rate: 动态语速，默认1.0
+            emotion: 情感，用于微调语速
         """
         try:
             import edge_tts
@@ -220,6 +255,11 @@ class SegmentedTTS:
             
             temp_mp3 = output_path + '.temp.mp3'
             
+            # v5.6: 计算Edge-TTS的rate参数
+            # Edge-TTS rate格式: "+10%", "-5%" 等
+            # 基础rate是-5%，需要根据speech_rate调整
+            tts_rate = self._calculate_tts_rate(speech_rate, emotion)
+            
             # 重试机制
             success = False
             for attempt in range(max_retries):
@@ -227,7 +267,7 @@ class SegmentedTTS:
                     communicate = edge_tts.Communicate(
                         optimized_text, 
                         self.voice, 
-                        rate=self.rate
+                        rate=tts_rate  # v5.6: 使用动态计算的rate
                     )
                     await communicate.save(temp_mp3)
                     
@@ -275,10 +315,10 @@ class SegmentedTTS:
                 self._add_fade(output_path, duration)
                 duration = self._get_audio_duration(output_path)  # 重新获取
             
-            # 调速（更保守）
-            if target_duration and duration > 0:
+            # v5.6: 只在动态语速无法完全填充时才后处理调速
+            if target_duration and duration > 0 and speech_rate == 1.0:
                 speed_ratio = duration / target_duration
-                # 只在差异很大时才调速（原1.3改为1.6）
+                # 只在差异很大时才调速
                 if speed_ratio > 1.6:
                     self._adjust_speed(output_path, min(speed_ratio, 1.8))
                     duration = self._get_audio_duration(output_path)
@@ -288,6 +328,50 @@ class SegmentedTTS:
         except Exception as e:
             print(f"   [ERROR] TTS合成异常: {e}")
             return False, 0
+    
+    def _calculate_tts_rate(self, speech_rate: float, emotion: str) -> str:
+        """
+        v5.6新增：计算Edge-TTS的rate参数
+        
+        Edge-TTS rate格式: "+10%", "-5%" 等
+        基础rate是-5%，需要根据speech_rate调整
+        
+        参数：
+            speech_rate: 动态语速 (0.85-1.15)
+            emotion: 情感
+        
+        返回：Edge-TTS rate字符串
+        """
+        # 基础rate对应的百分比
+        # self.rate = "-5%" 对应正常语速
+        base_percent = -5
+        
+        # speech_rate转换为百分比调整
+        # 1.0 = 0% 调整
+        # 0.85 = -15% 调整 (放慢)
+        # 1.15 = +15% 调整 (加速)
+        rate_adjustment = (speech_rate - 1.0) * 100
+        
+        # 情感微调
+        emotion_adjustment = 0
+        if emotion == 'sad':
+            emotion_adjustment = -5  # 悲伤再放慢5%
+        elif emotion == 'angry':
+            emotion_adjustment = +3  # 愤怒加速3%
+        elif emotion == 'excited':
+            emotion_adjustment = +2  # 兴奋加速2%
+        
+        # 计算最终rate
+        final_percent = base_percent + rate_adjustment + emotion_adjustment
+        
+        # 限制范围 (-30% ~ +20%)
+        final_percent = max(-30, min(20, final_percent))
+        
+        # 转换为字符串格式
+        if final_percent >= 0:
+            return f"+{int(final_percent)}%"
+        else:
+            return f"{int(final_percent)}%"
     
     def _add_fade(self, audio_path: str, duration: float):
         """添加淡入淡出（简化版）"""
@@ -349,10 +433,11 @@ async def synthesize_timeline_narrations(
     voice: str = None
 ) -> List[Dict]:
     """
-    为时间线中的解说场景生成音频
+    为时间线中的解说场景生成音频 v5.6
     
     参数：
         timeline: 时间线，每项需要 audio_mode 和 narration 字段
+                  v5.6新增：speech_rate（动态语速）、emotion（情感）
         output_dir: 输出目录
         voice: TTS语音
     
@@ -367,10 +452,15 @@ async def synthesize_timeline_narrations(
         if item.get('audio_mode') == 'voiceover':
             narration = item.get('narration', '').strip()
             if narration:
-                voiceover_segments.append({
+                segment = {
                     'text': narration,
-                    'scene_id': item.get('scene_id', len(voiceover_segments) + 1)
-                })
+                    'scene_id': item.get('scene_id', len(voiceover_segments) + 1),
+                    # v5.6: 传递动态语速和情感
+                    'speech_rate': item.get('speech_rate', 1.0),
+                    'emotion': item.get('emotion', 'neutral'),
+                }
+                voiceover_segments.append(segment)
+                
                 # 目标时长 = 场景时长
                 duration = item.get('source_end', 0) - item.get('source_start', 0)
                 target_durations.append(duration)
@@ -378,6 +468,11 @@ async def synthesize_timeline_narrations(
     if not voiceover_segments:
         print("[TTS] 没有需要合成的解说段落")
         return []
+    
+    # v5.6: 统计动态语速使用
+    dynamic_count = sum(1 for s in voiceover_segments if s.get('speech_rate', 1.0) != 1.0)
+    if dynamic_count > 0:
+        print(f"[TTS] 动态语速场景: {dynamic_count}个")
     
     # 合成
     tts = SegmentedTTS(voice=voice)
