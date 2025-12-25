@@ -145,13 +145,17 @@ def transcribe_video(video_path: str, output_srt: str = None, media_type: str = 
     segments = []
     full_text = ""
     
+    # v5.7.2: 导入过滤函数
     try:
-        from content_filter import filter_sensitive_content
+        from content_filter import filter_sensitive_content, is_ad_content
         use_filter = True
     except ImportError:
         use_filter = False
+        def is_ad_content(text):
+            return False
     
     seg_count = 0
+    ad_count = 0
     last_progress = 0
     for seg in segments_generator:
         seg_count += 1
@@ -169,6 +173,11 @@ def transcribe_video(video_path: str, output_srt: str = None, media_type: str = 
         
         text = seg.text.strip()
         
+        # v5.7.2: 首先过滤广告内容
+        if is_ad_content(text):
+            ad_count += 1
+            continue  # 跳过广告段落
+        
         if use_filter:
             text, removed = filter_sensitive_content(text)
             if removed:
@@ -181,6 +190,9 @@ def transcribe_video(video_path: str, output_srt: str = None, media_type: str = 
         }
         segments.append(segment)
         full_text += text
+    
+    if ad_count > 0:
+        log(f"[ASR]    [FILTER] 已过滤 {ad_count} 条广告/乱码")
     
     transcribe_time = time.time() - start_transcribe
     log(f"[ASR] ========== 语音识别完成 ==========")

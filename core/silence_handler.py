@@ -85,6 +85,7 @@ class SilenceHandler:
                 if name:
                     available.append(name)
             
+            # v5.7.3: qwen3的content字段有正确输出
             priority = ['qwen3', 'qwen2.5', 'qwen', 'llama3', 'gemma', 'mistral']
             for p in priority:
                 for a in available:
@@ -318,32 +319,17 @@ class SilenceHandler:
                 next_dialogue = next_scene.get('dialogue', '')[:50]
                 next_context = f"- 后一场景：{next_dialogue if next_dialogue else '(无对话)'}"
             
-            prompt = f"""请扩展以下解说，增加约{need_chars}字：
+            # v5.7.2: 简化prompt，禁止思考
+            prompt = f"""/no_think
+扩展解说到{target_chars}字：
 
-【当前解说】
-{narration}
+原文：{narration}
+场景：{dialogue[:60] if dialogue else '(无)'}
+风格：{style}
 
-【场景信息】
-- 对话：{dialogue[:100] if dialogue else '(无对话)'}
-- 情感：{emotion}
-- 剧情背景：{plot_summary[:100] if plot_summary else '(无)'}
-{prev_context}
-{next_context}
+规则：直接输出扩展后的解说，禁止输出"好的"、"首先"等思考过程。
 
-【静音类型】{silence_type}
-
-【扩展策略】
-{strategy}
-
-【要求】
-- 自然融入原解说
-- 总字数约{target_chars}字
-- 保持{style}风格
-- 不要复述对话原文
-- 不要出现"XX字"等字数标记
-- 直接输出解说，不要任何格式标记
-
-直接输出扩展后的完整解说："""
+输出："""
             
             response = ollama.chat(
                 model=self.llm_model,
@@ -354,21 +340,14 @@ class SilenceHandler:
                 }
             )
             
-            # 提取内容
+            # v5.7.3: 只从content提取，绝不使用thinking
             msg = response.get('message', {})
             result = ""
             
             if hasattr(msg, 'content') and msg.content:
                 result = msg.content.strip()
-            elif hasattr(msg, 'thinking') and msg.thinking:
-                # 从thinking提取
-                lines = msg.thinking.strip().split('\n')
-                for line in reversed(lines):
-                    line = line.strip()
-                    if line and len(line) > len(narration):
-                        result = line
-                        break
             
+            # v5.7.3: content为空返回None
             if not result:
                 return None
             

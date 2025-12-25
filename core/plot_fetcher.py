@@ -359,27 +359,17 @@ def summarize_plot_from_transcript(
             options={'temperature': 0.3, 'num_predict': 500}  # v5.5: 确保thinking完成
         )
         
-        # v5.5修复：正确访问Message对象属性
+        # v5.7.3: 只从content提取，绝不使用thinking
         msg = response.get('message', {})
         summary = ""
         
-        # 优先使用content
         if hasattr(msg, 'content') and msg.content:
             summary = msg.content.strip()
-        # content为空时尝试thinking
-        elif hasattr(msg, 'thinking') and msg.thinking:
-            thinking = msg.thinking.strip()
-            # 从thinking中提取最后的结论部分
-            lines = thinking.split('\n')
-            for line in reversed(lines):
-                line = line.strip()
-                if line and 30 < len(line) < 200:
-                    # 排除思考过程语句
-                    if not any(x in line for x in ['需要', '首先', '接下来', '可以', '应该']):
-                        summary = line
-                        break
-            if not summary:
-                summary = thinking[:200]
+        
+        # v5.7.3: content为空使用备用方案，不从thinking提取
+        if not summary:
+            print("   [AI] content为空，使用备用方案")
+            return _extract_key_info_from_transcript(transcript)
         
         # 清理可能的前缀
         summary = summary.replace('剧情总结：', '').replace('剧情总结:', '')
@@ -407,7 +397,7 @@ def _detect_ollama_model() -> Optional[str]:
             response = ollama.list()
             models = response.get('models', [])
             
-            # 按优先级选择
+            # v5.7.3: qwen3的content字段有正确输出
             priority = ['qwen3', 'qwen2.5', 'qwen', 'llama3', 'gemma', 'mistral']
             for p in priority:
                 for m in models:

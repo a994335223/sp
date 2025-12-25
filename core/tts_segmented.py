@@ -68,6 +68,41 @@ class SegmentedTTS:
         print(f"      基础语速: {self.rate}")
         print(f"      动态语速范围: {self.MIN_SPEED}x - {self.MAX_SPEED}x")
     
+    def _is_invalid_text(self, text: str) -> bool:
+        """
+        v5.7.2: 检测无效/垃圾解说文本
+        
+        检测内容：
+        1. AI思考过程残留
+        2. 被截断的句子
+        3. 字数标记
+        4. 过短文本
+        
+        返回True表示无效，应该跳过
+        """
+        if not text or len(text) < 8:
+            return True
+        
+        # AI思考过程关键词
+        invalid_keywords = [
+            '好的，', '好的,', '首先，', '首先,',
+            '用户', '原句', '这句话', '看起来',
+            '可能需要', '我需要', '让我', '接下来',
+            '从给定', '根据用', '下面是', '以下是',
+            '最终可能', '不过用户', '需要保持',
+            '字描述', '字来描述', '字：', '字:',
+            '【', '】',  # 字数标记括号
+        ]
+        for kw in invalid_keywords:
+            if kw in text:
+                return True
+        
+        # 检测被截断（太短且不以标点结尾）
+        if len(text) < 15 and text[-1] not in '。！？…～~':
+            return True
+        
+        return False
+    
     def _optimize_text_for_tts(self, text: str) -> str:
         """
         优化文本，减少TTS卡顿 v5.3
@@ -177,7 +212,13 @@ class SegmentedTTS:
             text = seg.get('text', '').strip()
             scene_id = seg.get('scene_id', i + 1)
             
-            if not text:
+            # v5.7.2: 增强文本验证
+            if not text or len(text) < 5:
+                continue
+            
+            # v5.7.2: 跳过明显被截断或包含垃圾的解说
+            if self._is_invalid_text(text):
+                log(f"[TTS] 跳过无效文本(场景{scene_id}): {text[:20]}...")
                 continue
             
             audio_path = os.path.join(output_dir, f"narration_{scene_id:04d}.wav")

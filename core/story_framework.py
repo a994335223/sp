@@ -92,6 +92,7 @@ class StoryFrameworkGenerator:
                 if name:
                     available.append(name)
             
+            # v5.7.3: qwen3的content字段有正确输出
             priority = ['qwen3', 'qwen2.5', 'qwen', 'llama3', 'gemma', 'mistral']
             for p in priority:
                 for a in available:
@@ -232,16 +233,16 @@ class StoryFrameworkGenerator:
                 }
             )
             
-            # 提取内容
+            # v5.7.3: 只从content提取，绝不使用thinking
             msg = response.get('message', {})
             content = ""
             
             if hasattr(msg, 'content') and msg.content:
                 content = msg.content.strip()
-            elif hasattr(msg, 'thinking') and msg.thinking:
-                content = msg.thinking.strip()
             
+            # v5.7.3: content为空返回None
             if not content:
+                log("[Framework] AI返回content为空")
                 return None
             
             # 解析JSON

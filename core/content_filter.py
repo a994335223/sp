@@ -139,11 +139,25 @@ def filter_narration(narration: str) -> str:
 
 
 def filter_transcript(segments: list) -> list:
-    """过滤字幕内容"""
+    """
+    过滤字幕内容 v5.7.2（增强版）
+    
+    过滤内容：
+    1. 广告乱码（Whisper识别广告产生的乱码）
+    2. 敏感词
+    """
     filtered_segments = []
+    ad_count = 0
     
     for seg in segments:
         text = seg.get('text', '')
+        
+        # v5.7.2: 首先检查是否是广告内容
+        if is_ad_content(text):
+            ad_count += 1
+            continue  # 直接跳过广告段落，不加入结果
+        
+        # 过滤敏感词
         filtered_text, removed = filter_sensitive_content(text)
         
         if removed:
@@ -151,6 +165,9 @@ def filter_transcript(segments: list) -> list:
         
         seg['text'] = filtered_text
         filtered_segments.append(seg)
+    
+    if ad_count > 0:
+        print(f"   [FILTER] 已过滤 {ad_count} 条广告/乱码字幕")
     
     return filtered_segments
 

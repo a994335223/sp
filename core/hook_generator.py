@@ -119,6 +119,7 @@ class HookGenerator:
                 if name:
                     available.append(name)
             
+            # v5.7.3: qwen3的content字段有正确输出
             priority = ['qwen3', 'qwen2.5', 'qwen', 'llama3', 'gemma', 'mistral']
             for p in priority:
                 for a in available:
@@ -251,79 +252,71 @@ class HookGenerator:
         style: str,
         duration_minutes: int
     ) -> Optional[str]:
-        """v5.7改进：AI生成个性化开场钩子"""
+        """v5.7.2改进：AI生成个性化开场钩子（增强版）"""
         if not self.llm_model:
             return None
         
         try:
             import ollama
             
-            # v5.7：提取剧情关键元素
-            key_elements = self._extract_key_elements(plot_summary, main_character)
+            # v5.7.2: 针对《狂飙》等剧的专属开场白
+            if '狂飙' in title:
+                specific_hint = "高启强从卖鱼到黑帮老大"
+            elif '人民的名义' in title:
+                specific_hint = "反腐风暴席卷官场"
+            else:
+                specific_hint = plot_summary[:50] if plot_summary else ""
             
-            prompt = f"""为《{title}》生成一个与剧情强关联的开场白（30-50字）：
+            char = main_character if main_character else "主角"
+            
+            # v5.7.2: 更明确的prompt
+            prompt = f"""/no_think
+为《{title}》写一句开场白（25-45字）：
 
-【剧情概要】
-{plot_summary[:300] if plot_summary else '(无剧情概要)'}
+关键：{specific_hint}
+主角：{char}
 
-【主角】
-{main_character if main_character else '(未知)'}
-
-【关键元素】
-{key_elements}
-
-【视频时长】
-{duration_minutes}分钟
-
-【要求 - v5.7个性化】
-1. 必须包含《{title}》的具体剧情元素（人名/地点/事件）
-2. 不要使用通用模板如"命运的齿轮"
-3. 要让观众一听就知道这是《{title}》的解说
-4. {style}风格
-5. 30-50字
-
-【示例（仅参考格式，内容要针对{title}）】
+示例格式：
 - "一个卖鱼的小贩，如何成为一手遮天的黑老大？"
-- "二十年前的一场意外，却让两个人的命运纠缠至今"
-- "扫黑除恶，为何让这座城市人人自危？"
+- "扫黑除恶风暴下，谁在颤抖？"
 
-直接输出开场白（必须与{title}剧情相关）："""
+禁止输出思考过程，直接写开场白："""
             
             response = ollama.chat(
                 model=self.llm_model,
                 messages=[{'role': 'user', 'content': prompt}],
                 options={
-                    'num_predict': 200,
-                    'temperature': 0.6,
+                    'num_predict': 150,
+                    'temperature': 0.7,
                 }
             )
             
-            # 提取内容
+            # v5.7.3: 只从content提取，绝不使用thinking
             msg = response.get('message', {})
             result = ""
             
             if hasattr(msg, 'content') and msg.content:
                 result = msg.content.strip()
-            elif hasattr(msg, 'thinking') and msg.thinking:
-                lines = msg.thinking.strip().split('\n')
-                for line in reversed(lines):
-                    line = line.strip()
-                    if line and 15 < len(line) < 80:
-                        if not any(x in line for x in ['用户', '需要', '可能', '首先', '我']):
-                            result = line
-                            break
             
+            # v5.7.3: content为空返回None，不从thinking提取
             if not result:
+                log(f"[Hook] AI返回为空")
                 return None
             
             # 清理格式
             result = result.strip('"\'')
             result = re.sub(r'^开场白[：:]\s*', '', result)
             result = re.sub(r'^【.*?】\s*', '', result)
+            result = re.sub(r'^-\s*', '', result)
+            result = re.sub(r'^["\']', '', result)
+            result = re.sub(r'["\']$', '', result)
             
-            # 验证长度
-            if len(result) < 15 or len(result) > 100:
+            # v5.7.2: 放宽长度验证（10-100字都接受）
+            if len(result) < 10:
+                log(f"[Hook] 结果太短: {len(result)}字")
                 return None
+            if len(result) > 100:
+                result = result[:100]  # 截断而不是丢弃
             
             return result
             
@@ -431,24 +424,15 @@ class HookGenerator:
 - "人生没有彩排，每一天都是现场直播"
 """
             
-            prompt = f"""为《{title}》生成{type_desc}（20-40字）：
+            # v5.7.2: 简化prompt，禁止思考
+            prompt = f"""/no_think
+为《{title}》生成结尾（20-40字）：
 
-【剧情概要】
-{plot_summary[:200] if plot_summary else '(无剧情概要)'}
+剧情：{plot_summary[:100] if plot_summary else ''}
+类型：{type_desc}
+风格：{style}
 
-【主角】
-{main_character if main_character else '(未知)'}
-
-【可选模板参考】
-{templates}
-
-【要求】
-- 20-40字
-- {type_desc}
-- {style}风格
-- 不要用"谢谢观看"等结束语
-
-直接输出结尾（不要解释）："""
+禁止输出思考过程，直接输出结尾："""
             
             response = ollama.chat(
                 model=self.llm_model,
@@ -459,21 +443,14 @@ class HookGenerator:
                 }
             )
             
-            # 提取内容
+            # v5.7.3: 只从content提取，绝不使用thinking
             msg = response.get('message', {})
             result = ""
             
             if hasattr(msg, 'content') and msg.content:
                 result = msg.content.strip()
-            elif hasattr(msg, 'thinking') and msg.thinking:
-                lines = msg.thinking.strip().split('\n')
-                for line in reversed(lines):
-                    line = line.strip()
-                    if line and 10 < len(line) < 60:
-                        if not any(x in line for x in ['用户', '需要', '可能', '首先', '我']):
-                            result = line
-                            break
             
+            # v5.7.3: content为空返回None
             if not result:
                 return None
             

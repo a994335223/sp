@@ -162,7 +162,7 @@ class VideoPipelineV5:
         
         # 打印启动信息
         print("\n" + "="*60)
-        print("[PIPELINE] SmartVideoClipper v5.7 - 全球最优智能解说")
+        print("[PIPELINE] SmartVideoClipper v5.7.3 - 全球最优智能解说")
         print("="*60)
         print("   v5.7 核心优化:")
         print("   1. [OK] 垃圾文字清洗（过滤AI思考残留）")
@@ -361,9 +361,9 @@ class VideoPipelineV5:
             scene_segments, narration_text = engine.analyze_and_generate(
                 analyzed_scenes, 
                 title, 
-                style,
+                actual_style,  # v5.7.1修复：使用自动检测的风格
                 episode_plot=episode_plot,
-                main_character=main_character  # v5.6新增
+                main_character=main_character
             )
             
             # v5.6: 获取钩子开场和悬念结尾
@@ -438,7 +438,8 @@ class VideoPipelineV5:
             # 保存解说剧本
             log("   [Step4] 4.4 保存解说剧本...")
             script_path = self.work_dir / "解说剧本_v5.txt"
-            self._save_script(active_timeline, script_path, title, style)
+            # v5.7.2修复：使用检测到的风格名称而不是原始style
+            self._save_script(active_timeline, script_path, title, style_name)
             
             # ========== Step 5: TTS分段合成 ==========
             report_progress(5, "分段合成解说配音...", "使用Edge-TTS生成语音")
@@ -562,13 +563,13 @@ class VideoPipelineV5:
         
         return 'neutral'
     
-    def _save_script(self, timeline: List[Dict], path: Path, title: str, style: str):
-        """保存解说剧本"""
+    def _save_script(self, timeline: List[Dict], path: Path, title: str, style_name: str):
+        """保存解说剧本 v5.7.2"""
         lines = []
         lines.append("=" * 60)
-        lines.append(f"SmartVideoClipper v5.0 - 解说剧本 (已修复版)")
+        lines.append(f"SmartVideoClipper v5.7.3 - 解说剧本")
         lines.append(f"作品: {title}")
-        lines.append(f"风格: {style}")
+        lines.append(f"风格: {style_name}")
         lines.append(f"生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         lines.append("=" * 60)
         lines.append("")

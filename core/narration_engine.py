@@ -115,10 +115,26 @@ STYLE_CONFIG = {
 
 def detect_video_genre(title: str, plot: str) -> str:
     """
-    v5.7：自动检测视频类型
+    v5.7.1：自动检测视频类型（修复版）
     返回类型：crime, comedy, romance, action, history, horror, default
     """
-    text = f"{title} {plot}".lower()
+    text = f"{title} {plot}"  # 中文不需要lower()
+    
+    # 特殊剧名直接映射
+    TITLE_GENRE_MAP = {
+        '狂飙': 'crime',
+        '扫黑风暴': 'crime',
+        '破冰行动': 'crime',
+        '人民的名义': 'crime',
+        '巡回检察组': 'crime',
+        '隐秘的角落': 'crime',
+        '沉默的真相': 'crime',
+    }
+    
+    # 检查标题直接映射
+    for drama_name, genre in TITLE_GENRE_MAP.items():
+        if drama_name in title:
+            return genre
     
     # 计算每个类型的匹配分数
     scores = {}
@@ -141,6 +157,54 @@ def get_optimal_style(genre: str) -> dict:
     return STYLE_CONFIG.get(genre, STYLE_CONFIG['default'])
 
 
+def safe_ollama_call(model: str, prompt: str, options: dict = None) -> str:
+    """
+    v5.7.3: 统一的ollama调用函数，从根源禁用thinking
+    
+    核心原则：
+    1. 只返回content内容
+    2. 绝不使用thinking字段
+    3. content为空返回空字符串
+    
+    参数：
+        model: 模型名称
+        prompt: 提示词
+        options: 额外选项
+        
+    返回：content字符串，不会包含thinking内容
+    """
+    try:
+        import ollama
+        
+        # 默认选项
+        default_options = {
+            'num_predict': 500,
+            'temperature': 0.5,
+        }
+        
+        if options:
+            default_options.update(options)
+        
+        response = ollama.chat(
+            model=model,
+            messages=[{'role': 'user', 'content': prompt}],
+            options=default_options
+        )
+        
+        # v5.7.3: 只从content提取，绝不使用thinking
+        msg = response.get('message', {})
+        
+        if hasattr(msg, 'content') and msg.content:
+            return msg.content.strip()
+        
+        # content为空返回空字符串
+        return ""
+        
+    except Exception as e:
+        print(f"[ollama] 调用异常: {e}", flush=True)
+        return ""
+
+
 # 低质量内容检测 - 这些绝对不能作为解说出现！
 BAD_PATTERNS = [
     "紧张的场面", "紧张的一幕", "此刻紧张", "画面一转，紧张",
@@ -152,90 +216,152 @@ BAD_PATTERNS = [
     "解说文本", "解说词", "旁白",
 ]
 
-# v5.7新增：AI输出垃圾内容清洗
+# v5.7.2新增：AI输出垃圾内容清洗（彻底重写版）
 def clean_narration_text(text: str) -> str:
     """
-    清洗解说文本中的垃圾内容 v5.7
+    清洗解说文本中的垃圾内容 v5.7.2
     
-    清洗内容：
-    1. 字数标记：15字、28字、30字等
-    2. AI思考过程残留
-    3. JSON格式残留
-    4. 后期术语：不打码、马赛克等
-    5. 多余标点
+    核心问题：Qwen3模型会输出思考过程，必须彻底清除
     """
     if not text:
         return ""
     
-    # 1. 删除字数标记（各种格式）
-    text = re.sub(r'\d+字[：:]\s*', '', text)
-    text = re.sub(r'"\d+字"\s*[：:]\s*', '', text)
-    text = re.sub(r'【\d+字】\s*', '', text)
-    text = re.sub(r'\(\d+字\)\s*', '', text)
-    
-    # 2. 删除AI思考过程残留
-    garbage_phrases = [
-        r'检查是否自然融入[^。，]*[。，]?',
-        r'可能需要多次调整[^。，]*[。，]?',
-        r'需要检查是否[^。，]*[。，]?',
-        r'接下来，我要确定[^。，]*[。，]?',
-        r'确保自然融入[^。，]*[。，]?',
-        r'主要信息包括[^。，]*[。，]?',
-        r'符合要求[^。，]*[。，]?',
-        r'所以最终的扩展[^。，]*[。，]?',
-        r'同时保持幽默和字数限制[^。，]*[。，]?',
-        r'没有复述对话原文[^。，]*[。，]?',
-        r'这样可以[^。，]*[。，]?',
-        r'下面是[^。，]*[。，]?',
-        r'以下是[^。，]*[。，]?',
+    # ========== 第一阶段：检测并丢弃AI思考内容 ==========
+    # 如果整个文本看起来是AI思考，直接返回空
+    ai_thinking_starts = [
+        '好的，', '好的,', '好的我', '好的 我',
+        '首先，', '首先,', '首先我',
+        '让我', '我来', '我需要', '我要',
+        '用户', '根据用户', '根据要求',
+        '原句', '这句话', '看起来',
+        '可能需要', '需要检查', '需要确认',
+        '接下来', '下面我', '现在我',
     ]
-    for pattern in garbage_phrases:
-        text = re.sub(pattern, '', text)
+    text_start = text[:20] if len(text) > 20 else text
+    for start in ai_thinking_starts:
+        if text_start.startswith(start):
+            # 整个文本可能是AI思考，尝试提取有效内容
+            # 查找最后一个引号后的内容，或者直接丢弃
+            return ""
     
-    # 3. 删除JSON格式残留
-    text = re.sub(r'"\d+字"\s*:\s*"', '', text)
-    text = re.sub(r'",\s*$', '', text)
+    # ========== 第二阶段：删除AI思考片段 ==========
+    garbage_patterns = [
+        # 完整句式 - 必须删除
+        r'好的[，,\s]*[我用].*?[。，,]',
+        r'用\d+个?字.*?描述[。，,]?',
+        r'原句[是为：:][^。]*[。]?',
+        r'这句话[是说可].*?[。，]',
+        r'看起来.*?[。，]',
+        r'可能[是需要].*?[。，]',
+        r'我需要.*?[。，]',
+        r'让我[来先].*?[。，]',
+        r'首先[，,]?.*?[。，]',
+        r'接下来[，,]?.*?[。，]',
+        r'根据[用要]户.*?[。，]',
+        r'用户[让想要].*?[。，]',
+        r'下面[是我].*?[。，]',
+        r'以下[是为].*?[。，]',
+        
+        # 关键词删除
+        r'用五个字',
+        r'用\d+个字',
+        r'\d+字[：:]',
+        r'[\[【]\d+字[\]】]',
+        r'检查是否',
+        r'确保.*?融入',
+        r'符合要求',
+        r'主要信息',
+        r'没有复述',
+        r'笑死',
+        r'快递',
+    ]
+    
+    for pattern in garbage_patterns:
+        text = re.sub(pattern, '', text, flags=re.DOTALL)
+    
+    # ========== 第三阶段：删除JSON残留 ==========
+    text = re.sub(r'"\d+字"\s*[：:]\s*"?', '', text)
+    text = re.sub(r'^[\d]+[\.、]\s*', '', text)
+    text = re.sub(r'",?\s*$', '', text)
     text = re.sub(r'^"', '', text)
     text = re.sub(r'"$', '', text)
     
-    # 4. 删除后期术语
-    text = re.sub(r'不打马赛克[！!]?', '', text)
-    text = re.sub(r'不打马[！!]?', '', text)
-    text = re.sub(r'真相不打码[！!]?', '', text)
-    text = re.sub(r'真相不绕弯[！!]?', '', text)
-    
-    # 5. 清理多余标点
+    # ========== 第四阶段：清理标点 ==========
     text = re.sub(r'[，,]{2,}', '，', text)
     text = re.sub(r'[。.]{2,}', '。', text)
     text = re.sub(r'[！!]{2,}', '！', text)
-    text = re.sub(r'^[，,。.！!]+', '', text)
+    text = re.sub(r'^[，,。.！!\s]+', '', text)
     text = re.sub(r'[，,]+$', '', text)
     
-    # 6. 去除首尾空白和多余空格
+    # ========== 第五阶段：最终检查 ==========
     text = text.strip()
     text = re.sub(r'\s+', ' ', text)
+    
+    # 如果清洗后太短或仍包含AI思考特征，返回空
+    if len(text) < 5:
+        return ""
+    
+    # 最终检查是否仍有AI思考残留
+    final_check_patterns = ['好的', '首先', '我需要', '用户', '原句', '这句话', '看起来', '可能需要']
+    for p in final_check_patterns:
+        if p in text[:15]:
+            return ""
     
     return text
 
 
 def validate_narration(text: str) -> bool:
     """
-    验证解说是否合格 v5.7
+    验证解说是否合格 v5.7.2（彻底重写版）
     返回True表示合格，False表示需要重新生成
     """
-    if not text or len(text) < 5:
+    if not text or len(text) < 8:  # 至少8字才算有效解说
         return False
     
-    # 检测垃圾内容
+    # 检测被截断（以标点结尾才算完整）
+    if not text[-1] in '。！？…～~':
+        # 允许某些非标点结尾
+        if len(text) < 15:  # 太短且没有标点，可能被截断
+            return False
+    
+    # v5.7.2: 全面的垃圾内容检测
     invalid_patterns = [
+        # AI思考过程
+        r'好的[，,\s]',
+        r'首先[，,\s]',
+        r'用户',
+        r'原句[是为]',
+        r'这句话',
+        r'看起来',
+        r'可能[是需要]',
+        r'我[来需要]',
+        r'让我',
+        r'接下来',
+        r'从给定',
+        r'根据[用要]',
+        r'下面[是我]',
+        r'以下[是为]',
+        r'最终可能',
+        r'不过用户',
+        r'需要保持',
+        r'或者[，,]?原',
+        
+        # 字数标记
         r'\d+字[：:]',
-        r'检查是否',
-        r'需要确认',
-        r'可能需要',
+        r'[\[【]\d+字[\]】]',
+        r'约?\d+字',
+        
+        # 后期术语
         r'不打码',
         r'马赛克',
-        r'主要信息包括',
-        r'接下来，我要',
+        r'检查是否',
+        r'需要确认',
+        r'主要信息',
+        r'符合要求',
+        
+        # 网络用语
+        r'笑死',
+        r'快递',
     ]
     for pattern in invalid_patterns:
         if re.search(pattern, text):
@@ -343,7 +469,8 @@ class NarrationEngine:
                 if name:
                     available.append(name)  # 保留完整名称如 qwen3:8b
             
-            # 按优先级选择
+            # v5.7.3: qwen3工作正常，content字段有正确输出
+            # thinking和content是分离的，只需正确提取content即可
             priority = ['qwen3', 'qwen2.5', 'qwen', 'llama3', 'gemma', 'mistral']
             for p in priority:
                 for a in available:
@@ -502,7 +629,18 @@ class NarrationEngine:
         return final_scenes, full_narration
     
     def _understand_plot(self, scenes: List[Dict]) -> str:
-        """理解整体剧情"""
+        """
+        理解整体剧情 v5.7.2（修复版）
+        
+        优先级：
+        1. 使用TMDB获取的分集剧情（最准确）
+        2. 如果没有，才从对话中AI总结
+        """
+        # v5.7.2修复：优先使用TMDB剧情！
+        if self.episode_plot and len(self.episode_plot) > 20:
+            return f"剧情总结：{self.episode_plot}"
+        
+        # 备用：从对话中总结
         all_dialogues = []
         for scene in scenes:
             dialogue = scene.get('dialogue', '').strip()
@@ -519,9 +657,9 @@ class NarrationEngine:
             combined = "\n".join(all_dialogues[:50])
             summary = self._ai_summarize(combined)
             if summary:
-                return summary
+                return f"剧情总结：{summary}"
         
-        # 备用：简单拼接
+        # 最后备用：简单拼接
         return " ".join(all_dialogues[:10])[:500]
     
     def _mark_scenes(self, scenes: List[Dict]) -> List[SceneSegment]:
@@ -529,6 +667,7 @@ class NarrationEngine:
         标记每个场景的类型
         
         v5.3改进：使用更宽松的阈值，确保更多场景被标记为解说
+        v5.7.1增强：增加广告内容过滤
         """
         result = []
         
@@ -536,6 +675,11 @@ class NarrationEngine:
             dialogue = scene.get('dialogue', '').strip()
             emotion = scene.get('emotion', 'neutral')
             importance = scene.get('importance', 0.5)
+            
+            # v5.7.1：广告内容过滤
+            if self._is_ad_content(dialogue):
+                dialogue = ""  # 清空广告内容
+                importance = 0.1  # 降低重要性
             
             dialogue = self._filter_sensitive(dialogue)
             
@@ -897,21 +1041,23 @@ class NarrationEngine:
             
             scenes_text = "\n".join(scene_list)
             
-            prompt = f"""为以下{len(batch_scenes)}个场景各生成一句{style}解说。
+            # v5.7.2: 添加/no_think禁用思考模式，明确禁止输出思考过程
+            prompt = f"""/no_think
+为以下{len(batch_scenes)}个场景生成解说。
 
-剧情背景：{plot_summary[:150]}
+【剧情】{plot_summary[:100]}
 
-场景列表（含上下文和目标字数）：
+【场景】
 {scenes_text}
 
-要求：
-1. 每句解说按[目标字数]生成
+【规则-严格遵守】
+1. 只输出JSON数组，格式：["解说1", "解说2", ...]
 2. {style}风格
-3. 结合上下文，承上启下
-4. 不要复述对话原文
-5. 直接输出JSON数组格式
+3. 每句15-40字
+4. 禁止输出：思考过程、"好的"、"首先"、"用X个字"、"原句"等
+5. 禁止复述对话
 
-输出格式：["解说1", "解说2", ...]"""
+直接输出JSON："""
             
             response = ollama.chat(
                 model=self.llm_model,
@@ -922,36 +1068,54 @@ class NarrationEngine:
                 }
             )
             
-            # 提取内容
+            # v5.7.3: 只从content提取，绝不使用thinking（根源杜绝思考内容泄露）
             msg = response.get('message', {})
             content = ""
             
             if hasattr(msg, 'content') and msg.content:
                 content = msg.content.strip()
-            elif hasattr(msg, 'thinking') and msg.thinking:
-                content = msg.thinking.strip()
             
+            # v5.7.3: content为空则返回空列表，不从thinking提取！
             if not content:
+                print(f"[Narration] 警告: AI返回content为空，跳过thinking", flush=True)
                 return []
             
-            # 解析JSON数组
+            # v5.7.3: 改进JSON解析，处理嵌套数组
             import json
-            match = re.search(r'\[.*?\]', content, re.DOTALL)
-            if match:
-                try:
-                    results = json.loads(match.group())
-                    if isinstance(results, list):
-                        cleaned = []
-                        for r in results:
-                            if isinstance(r, str):
-                                r = r.strip().strip('"\'')
-                                r = re.sub(r'^[\d]+[\.、]\s*', '', r)
-                                cleaned.append(r)
-                            else:
-                                cleaned.append("")
-                        return cleaned
-                except json.JSONDecodeError:
-                    pass
+            
+            # 使用贪婪匹配获取完整JSON数组（处理嵌套情况）
+            # 尝试多种模式
+            json_patterns = [
+                r'\[[\s\S]*\]',  # 贪婪匹配完整数组
+                r'\[\s*\[[\s\S]*\]\s*\]',  # 嵌套数组
+                r'\[.*?\]',  # 非贪婪（最后尝试）
+            ]
+            
+            for pattern in json_patterns:
+                match = re.search(pattern, content)
+                if match:
+                    try:
+                        results = json.loads(match.group())
+                        # 处理嵌套数组: [[...]] -> [...]
+                        if isinstance(results, list) and len(results) == 1 and isinstance(results[0], list):
+                            results = results[0]
+                        if isinstance(results, list):
+                            cleaned = []
+                            for r in results:
+                                if isinstance(r, str):
+                                    r = r.strip().strip('"\'')
+                                    r = re.sub(r'^[\d]+[\.、]\s*', '', r)
+                                    cleaned.append(r)
+                                elif isinstance(r, list):  # 再次处理嵌套
+                                    for sub in r:
+                                        if isinstance(sub, str):
+                                            cleaned.append(sub.strip())
+                                else:
+                                    cleaned.append("")
+                            if cleaned:  # 有结果才返回
+                                return cleaned
+                    except json.JSONDecodeError:
+                        continue
             
             # JSON解析失败，尝试按行分割
             lines = content.split('\n')
@@ -1081,19 +1245,21 @@ class NarrationEngine:
             
             scenes_text = "\n".join(scene_list)
             
-            prompt = f"""为以下{len(scenes)}个场景各生成一句{style}解说（15-30字）。
+            # v5.7.2: 添加/no_think禁用思考模式
+            prompt = f"""/no_think
+为以下{len(scenes)}个场景生成解说。
 
-剧情背景：{plot_summary[:150]}
+【剧情】{plot_summary[:100]}
 
-场景对话：
+【场景】
 {scenes_text}
 
-要求：
-1. 每句解说15-30字
-2. {style}风格
-3. 直接输出JSON数组格式
+【规则-严格遵守】
+1. 只输出JSON数组：["解说1", "解说2", ...]
+2. {style}风格，每句15-30字
+3. 禁止输出思考过程、"好的"、"首先"等
 
-输出格式：["解说1", "解说2", ...]"""
+直接输出JSON："""
             
             response = ollama.chat(
                 model=self.llm_model,
@@ -1104,46 +1270,58 @@ class NarrationEngine:
                 }
             )
             
-            # 提取内容
+            # v5.7.3: 只从content提取，绝不使用thinking
             msg = response.get('message', {})
             content = ""
             
-            # 优先使用content
             if hasattr(msg, 'content') and msg.content:
                 content = msg.content.strip()
-            # content为空时尝试thinking
-            elif hasattr(msg, 'thinking') and msg.thinking:
-                content = msg.thinking.strip()
             
+            # v5.7.3: content为空返回空列表，不从thinking提取
             if not content:
                 return []
             
-            # 解析JSON数组
+            # v5.7.3: 改进JSON解析，处理嵌套数组
             import re
             import json
             
-            # 尝试找到JSON数组
-            match = re.search(r'\[.*?\]', content, re.DOTALL)
-            if match:
-                try:
-                    results = json.loads(match.group())
-                    if isinstance(results, list):
-                        # 清理每个结果 v5.7增强：使用clean_narration_text
-                        cleaned = []
-                        for r in results:
-                            if isinstance(r, str):
-                                r = r.strip().strip('"\'')
-                                r = re.sub(r'^[\d]+[\.、]\s*', '', r)
-                                r = clean_narration_text(r)  # v5.7: 清洗垃圾内容
-                                if r and validate_narration(r):  # v5.7: 验证
-                                    cleaned.append(r)
+            # 使用多种模式尝试解析
+            json_patterns = [
+                r'\[[\s\S]*\]',  # 贪婪匹配完整数组
+                r'\[\s*\[[\s\S]*\]\s*\]',  # 嵌套数组
+                r'\[.*?\]',  # 非贪婪
+            ]
+            
+            for pattern in json_patterns:
+                match = re.search(pattern, content)
+                if match:
+                    try:
+                        results = json.loads(match.group())
+                        # 处理嵌套数组: [[...]] -> [...]
+                        if isinstance(results, list) and len(results) == 1 and isinstance(results[0], list):
+                            results = results[0]
+                        if isinstance(results, list):
+                            # 清理每个结果 v5.7增强：使用clean_narration_text
+                            cleaned = []
+                            for r in results:
+                                if isinstance(r, str):
+                                    r = r.strip().strip('"\'')
+                                    r = re.sub(r'^[\d]+[\.、]\s*', '', r)
+                                    r = clean_narration_text(r)  # v5.7: 清洗垃圾内容
+                                    if r and validate_narration(r):  # v5.7: 验证
+                                        cleaned.append(r)
+                                    else:
+                                        cleaned.append("")  # 不合格则返回空
+                                elif isinstance(r, list):  # 处理嵌套
+                                    for sub in r:
+                                        if isinstance(sub, str):
+                                            cleaned.append(clean_narration_text(sub.strip()))
                                 else:
-                                    cleaned.append("")  # 不合格则返回空
-                            else:
-                                cleaned.append("")
-                        return cleaned
-                except json.JSONDecodeError:
-                    pass
+                                    cleaned.append("")
+                            if cleaned:
+                                return cleaned
+                    except json.JSONDecodeError:
+                        continue
             
             # JSON解析失败，尝试按行分割
             lines = content.split('\n')
@@ -1166,7 +1344,7 @@ class NarrationEngine:
     
     def _ai_summarize_dialogue(self, dialogue: str) -> str:
         """
-        用AI总结对话（备用方案）
+        用AI总结对话（备用方案）v5.7.2
         
         替代原来的模板方案，确保每个解说都是AI生成的
         """
@@ -1176,8 +1354,8 @@ class NarrationEngine:
         try:
             import ollama
             
-            # 简短prompt，快速生成
-            prompt = f"用15字概括这段对话：{dialogue[:100]}"
+            # v5.7.2: 简化prompt + 禁止思考
+            prompt = f"/no_think\n概括（15字内）：{dialogue[:80]}\n直接输出："
             
             response = ollama.chat(
                 model=self.llm_model,
@@ -1188,26 +1366,19 @@ class NarrationEngine:
                 }
             )
             
+            # v5.7.3: 只从content提取，绝不使用thinking
             msg = response.get('message', {})
             result = ""
             
             if hasattr(msg, 'content') and msg.content:
                 result = msg.content.strip()
-            elif hasattr(msg, 'thinking') and msg.thinking:
-                # 从thinking提取最后一句
-                lines = msg.thinking.strip().split('\n')
-                for line in reversed(lines):
-                    line = line.strip()
-                    if line and 5 < len(line) < 40:
-                        if not any(x in line for x in ['用户', '需要', '可能', '首先']):
-                            result = line
-                            break
             
+            # v5.7.3: content为空返回空，不从thinking提取
             if result:
                 result = result.strip('"\'')
-                result = clean_narration_text(result)  # v5.7: 清洗垃圾内容
+                result = clean_narration_text(result)
                 result = self._filter_sensitive(result)
-                if not validate_narration(result):  # v5.7: 验证
+                if not validate_narration(result):
                     return ""
             
             return result
@@ -1225,9 +1396,9 @@ class NarrationEngine:
     
     def _ensure_voiceover_ratio(self, scenes: List[SceneSegment]) -> List[SceneSegment]:
         """
-        确保达到目标解说比例 v5.5
+        确保达到目标解说比例 v5.7.2（修复版）
         
-        v5.5改进：不再使用模板，调用AI生成
+        v5.7.2修复：支持双向调整（增加或减少解说）
         """
         active_scenes = [s for s in scenes if s.audio_mode != AudioMode.SKIP]
         if not active_scenes:
@@ -1237,18 +1408,40 @@ class NarrationEngine:
         total = len(active_scenes)
         
         current_ratio = voiceover_count / total if total > 0 else 0
+        target_ratio = self.voiceover_ratio
         
-        print(f"   当前解说比例: {current_ratio*100:.0f}%, 目标: {self.voiceover_ratio*100:.0f}%")
+        print(f"   当前解说比例: {current_ratio*100:.0f}%, 目标: {target_ratio*100:.0f}%")
         
-        if current_ratio < self.voiceover_ratio:
-            # 需要增加解说场景
-            need_convert = int(total * self.voiceover_ratio) - voiceover_count
+        # v5.7.2修复：解说过多时减少
+        if current_ratio > target_ratio + 0.05:  # 超过目标5%以上才调整
+            need_reduce = voiceover_count - int(total * target_ratio)
+            
+            # 按重要性排序解说场景（低重要性优先转为原声）
+            voiceover_scenes = [s for s in active_scenes if s.audio_mode == AudioMode.VOICEOVER]
+            voiceover_scenes.sort(key=lambda x: x.importance)
+            
+            reduced = 0
+            for scene in voiceover_scenes:
+                if reduced >= need_reduce:
+                    break
+                
+                # 只转换低重要性场景
+                if scene.importance < 0.5 and scene.dialogue and len(scene.dialogue) > 30:
+                    scene.audio_mode = AudioMode.ORIGINAL
+                    scene.narration = ""
+                    scene.reason = "比例调整:解说→原声"
+                    reduced += 1
+            
+            print(f"   比例调整: 转换{reduced}个解说场景为原声")
+        
+        # 解说过少时增加
+        elif current_ratio < target_ratio - 0.05:  # 低于目标5%以上才调整
+            need_convert = int(total * target_ratio) - voiceover_count
             
             # 按重要性排序原声场景（低重要性优先转换）
             original_scenes = [s for s in active_scenes if s.audio_mode == AudioMode.ORIGINAL]
             original_scenes.sort(key=lambda x: x.importance)
             
-            # 收集需要转换的场景
             to_convert = []
             for scene in original_scenes:
                 if len(to_convert) >= need_convert:
@@ -1281,6 +1474,8 @@ class NarrationEngine:
                             converted += 1
                 
                 print(f"   比例调整: 转换{converted}个场景为解说")
+        else:
+            print(f"   比例调整: 无需调整（误差在±5%内）")
         
         return scenes
     
@@ -1309,26 +1504,14 @@ class NarrationEngine:
             )
             
             # 获取内容（v5.5修复：正确访问Message对象属性）
+            # v5.7.3: 只从content提取，绝不使用thinking
             msg = response.get('message', {})
             result = ""
             
-            # 优先使用content
             if hasattr(msg, 'content') and msg.content:
                 result = msg.content.strip()
-            # content为空时尝试thinking
-            elif hasattr(msg, 'thinking') and msg.thinking:
-                # 从thinking提取总结部分
-                thinking = msg.thinking.strip()
-                # 取最后几行作为结论
-                lines = thinking.split('\n')
-                for line in reversed(lines):
-                    line = line.strip()
-                    if line and 20 < len(line) < 150:
-                        result = line
-                        break
-                if not result:
-                    result = thinking[:200]
             
+            # v5.7.3: content为空返回空，不从thinking提取
             return self._filter_sensitive(result)
             
         except Exception as e:
@@ -1349,19 +1532,9 @@ class NarrationEngine:
         try:
             import ollama
             
-            # 构建上下文
-            if self.media_type == "tv" and self.episode_plot:
-                context = f"剧情：{self.episode_plot[:100]}。对话：{dialogue[:150]}"
-                task = f"生成{style}解说（15-30字）"
-            else:
-                context = f"对话：{dialogue[:150]}"
-                task = f"生成{style}解说（10-25字）"
-            
-            prompt = f"""{task}
-
-{context}
-
-直接输出解说（一句话，不要解释）："""
+            # v5.7.2: 极简prompt，禁止思考
+            dialogue_short = dialogue[:80] if dialogue else ""
+            prompt = f"/no_think\n{style}解说（15-25字）：{dialogue_short}\n直接输出："
             
             response = ollama.chat(
                 model=self.llm_model,
@@ -1373,24 +1546,14 @@ class NarrationEngine:
                 }
             )
             
-            # v5.5修复：正确访问Message对象属性
+            # v5.7.3: 只从content提取，绝不使用thinking
             msg = response.get('message', {})
             result = ""
             
-            # 优先使用content
             if hasattr(msg, 'content') and msg.content:
                 result = msg.content.strip()
-            # content为空时尝试thinking
-            elif hasattr(msg, 'thinking') and msg.thinking:
-                thinking = msg.thinking
-                lines = thinking.split('\n')
-                for line in reversed(lines):
-                    line = line.strip()
-                    if line and 5 < len(line) < 50:
-                        if not any(x in line for x in ['用户', '需要', '可能', '首先', '接下来']):
-                            result = line
-                            break
             
+            # v5.7.3: content为空返回空，不从thinking提取
             if not result:
                 return ""
             
@@ -1414,7 +1577,7 @@ class NarrationEngine:
     
     def _simple_ai_generate(self, dialogue: str, style: str) -> str:
         """
-        v5.7：超简化AI生成（作为第二次兜底）
+        v5.7.2：超简化AI生成（作为第二次兜底）
         使用最简单的prompt确保生成成功
         """
         if not self.llm_model or not dialogue:
@@ -1423,8 +1586,8 @@ class NarrationEngine:
         try:
             import ollama
             
-            # 超简化prompt
-            prompt = f"用10字描述：{dialogue[:50]}"
+            # v5.7.2: 极简prompt
+            prompt = f"/no_think\n描述（10字）：{dialogue[:40]}\n输出："
             
             response = ollama.chat(
                 model=self.llm_model,
@@ -1435,19 +1598,14 @@ class NarrationEngine:
                 }
             )
             
+            # v5.7.3: 只从content提取，绝不使用thinking
             msg = response.get('message', {})
             result = ""
             
             if hasattr(msg, 'content') and msg.content:
                 result = msg.content.strip()
-            elif hasattr(msg, 'thinking') and msg.thinking:
-                lines = msg.thinking.strip().split('\n')
-                for line in reversed(lines):
-                    line = line.strip()
-                    if 5 < len(line) < 30:
-                        result = line
-                        break
             
+            # v5.7.3: content为空返回空
             if result:
                 result = clean_narration_text(result)
                 result = self._filter_sensitive(result)
@@ -1459,7 +1617,7 @@ class NarrationEngine:
     
     def _keyword_based_generate(self, dialogue: str, style: str) -> str:
         """
-        v5.7：基于关键词生成（作为最后兜底）
+        v5.7.2：基于关键词生成（作为最后兜底）
         提取对话中的关键动作/名词生成简单解说
         """
         if not dialogue:
@@ -1468,8 +1626,8 @@ class NarrationEngine:
         try:
             import ollama
             
-            # 最简单的prompt
-            prompt = f"从'{dialogue[:30]}'提取动作，用5字描述"
+            # v5.7.2: 极简prompt
+            prompt = f"/no_think\n动作（5字）：{dialogue[:25]}\n输出："
             
             response = ollama.chat(
                 model=self.llm_model,
@@ -1480,14 +1638,14 @@ class NarrationEngine:
                 }
             )
             
+            # v5.7.3: 只从content提取，绝不使用thinking
             msg = response.get('message', {})
             result = ""
             
             if hasattr(msg, 'content') and msg.content:
                 result = msg.content.strip()
-            elif hasattr(msg, 'thinking') and msg.thinking:
-                result = msg.thinking.strip().split('\n')[-1]
             
+            # v5.7.3: content为空返回空
             if result:
                 result = clean_narration_text(result)
                 result = self._filter_sensitive(result)
@@ -1570,6 +1728,39 @@ class NarrationEngine:
             narrations.append(f"[结尾] {self.suspense_ending}")
         
         return "\n".join(narrations)
+    
+    def _is_ad_content(self, text: str) -> bool:
+        """
+        v5.7.1：检测广告内容
+        """
+        if not text:
+            return False
+        
+        # 广告特征模式
+        ad_patterns = [
+            r'用痛[﹔;]',
+            r'用经敌',
+            r'家中常备',
+            r'邀您观看',
+            r'教您观看',
+            r'巨颗话谈',
+            r'苦红利焉',
+            r'精通电子案',
+            r'穿被皮发膏',
+            r'赞助播出',
+            r'独家冠名',
+            r'[﹔;]{3,}',  # 连续分号（Whisper乱码特征）
+        ]
+        
+        for pattern in ad_patterns:
+            if re.search(pattern, text):
+                return True
+        
+        # 高密度分号检测（广告乱码特征）
+        if text.count('﹔') > 2 or text.count(';') > 3:
+            return True
+        
+        return False
     
     def _filter_sensitive(self, text: str) -> str:
         """过滤敏感词"""
