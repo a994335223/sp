@@ -1,17 +1,19 @@
-# core/dynamic_ratio.py - 动态解说比例计算器 v5.6
+# core/dynamic_ratio.py - 动态解说比例计算器 v5.7
 """
-SmartVideoClipper - 动态解说比例计算器 v5.6
+SmartVideoClipper - 动态解说比例计算器 v5.7
 
-核心功能：
-1. 根据场景类型分布计算最优解说比例
-2. 替代固定60%的硬编码
-3. 支持场景级别微调
+v5.7核心改进：
+1. 废除固定目标比例！改用场景级别智能判断
+2. 每个场景独立决定是否需要解说
+3. 精彩对白/名台词/强情感 → 100%保留原声
+4. 过渡/复杂剧情/无对白 → 100%使用解说
 
-设计原则：
-- 对话多 → 减少解说（保留原声）
-- 动作多 → 增加解说（画面需要解释）
-- 情感强 → 减少解说（让情感发酵）
-- 比例范围：30% ~ 75%
+设计原则（v5.7）：
+- 精彩对白必须保留原声
+- 演员演技场景必须保留原声
+- 剧情推进可用解说概括
+- 无对白场景用解说填充
+- 不再追求固定比例！
 """
 
 import sys
@@ -259,6 +261,110 @@ def calculate_optimal_ratio(
     """
     calculator = DynamicRatioCalculator(media_type)
     return calculator.calculate_global_ratio(scenes)
+
+
+def should_use_narration_v57(scene: Dict) -> Tuple[bool, str]:
+    """
+    v5.7：智能判断场景是否需要解说（废除固定比例）
+    
+    核心原则：
+    1. 精彩对白 → 原声
+    2. 强情感/演技场景 → 原声
+    3. 过渡/背景 → 解说
+    4. 无对白 → 解说
+    
+    返回：(是否使用解说, 原因)
+    """
+    dialogue = scene.get('dialogue', '').strip()
+    emotion = scene.get('emotion', 'neutral')
+    importance = scene.get('importance', 0.5)
+    scene_type = scene.get('scene_type', '').lower()
+    
+    # ========== 必须保留原声的情况 ==========
+    
+    # 1. 高重要性 + 长对话 = 精彩对白
+    if importance >= 0.85 and dialogue and len(dialogue) > 40:
+        return False, "精彩对白必须保留原声"
+    
+    # 2. 强情感场景 = 演技展示
+    if emotion in ['angry', 'crying', 'excited', 'sad'] and importance >= 0.75:
+        return False, f"强情感场景({emotion})保留原声"
+    
+    # 3. 有质量的对话（长度适中+重要）
+    if dialogue and 30 < len(dialogue) < 100 and importance >= 0.7:
+        return False, "有质量的对话保留原声"
+    
+    # 4. 非常高重要性（如高潮场景）
+    if importance >= 0.9:
+        return False, "高潮场景保留原声"
+    
+    # ========== 必须使用解说的情况 ==========
+    
+    # 5. 无对白场景
+    if not dialogue or len(dialogue) < 5:
+        return True, "无对白场景需要解说"
+    
+    # 6. 过渡场景
+    if scene_type in ['transition', 'background', 'establishing']:
+        return True, "过渡场景使用解说"
+    
+    # 7. 低重要性场景
+    if importance < 0.3:
+        return True, "低重要性场景使用解说"
+    
+    # 8. 对话太长（需要概括）
+    if dialogue and len(dialogue) > 150:
+        return True, "长对话用解说概括"
+    
+    # ========== 中间情况：根据特征决定 ==========
+    
+    # 9. 中等重要性 + 短对话 = 解说
+    if importance < 0.6 and dialogue and len(dialogue) < 30:
+        return True, "普通对话用解说概括"
+    
+    # 10. 中等重要性 + 中等对话 = 看情感
+    if emotion == 'neutral' and importance < 0.65:
+        return True, "平淡场景用解说概括"
+    
+    # 默认：保留原声
+    return False, "默认保留原声"
+
+
+def classify_scenes_v57(scenes: List[Dict]) -> Tuple[List[Dict], Dict]:
+    """
+    v5.7：对所有场景进行智能分类
+    
+    返回：(分类后的场景列表, 统计信息)
+    """
+    original_count = 0
+    voiceover_count = 0
+    
+    for scene in scenes:
+        use_narration, reason = should_use_narration_v57(scene)
+        scene['v57_use_narration'] = use_narration
+        scene['v57_reason'] = reason
+        
+        if use_narration:
+            voiceover_count += 1
+        else:
+            original_count += 1
+    
+    total = len(scenes)
+    stats = {
+        'total': total,
+        'original': original_count,
+        'voiceover': voiceover_count,
+        'original_ratio': original_count / total if total > 0 else 0,
+        'voiceover_ratio': voiceover_count / total if total > 0 else 0,
+    }
+    
+    log(f"[Ratio v5.7] ========== 智能场景分类 ==========")
+    log(f"[Ratio v5.7] 总场景: {total}")
+    log(f"[Ratio v5.7] 原声场景: {original_count} ({stats['original_ratio']*100:.0f}%)")
+    log(f"[Ratio v5.7] 解说场景: {voiceover_count} ({stats['voiceover_ratio']*100:.0f}%)")
+    log(f"[Ratio v5.7] ================================")
+    
+    return scenes, stats
 
 
 # 测试

@@ -131,6 +131,41 @@ class HookGenerator:
         except Exception:
             self.llm_model = None
     
+    def _extract_key_elements(self, plot_summary: str, main_character: str) -> str:
+        """
+        v5.7：从剧情中提取关键元素用于个性化钩子
+        """
+        elements = []
+        
+        if main_character:
+            elements.append(f"主角: {main_character}")
+        
+        if plot_summary:
+            # 提取人名
+            import re
+            names = re.findall(r'([高李王张刘陈安唐龚][^\s，。、]{0,2})', plot_summary)
+            if names:
+                unique_names = list(set(names))[:3]
+                elements.append(f"人物: {', '.join(unique_names)}")
+            
+            # 提取地点
+            places = re.findall(r'(京海|省|市|区|县)', plot_summary)
+            if places:
+                elements.append(f"地点: {list(set(places))[0]}")
+            
+            # 提取关键词
+            keywords = []
+            if '扫黑' in plot_summary or '除恶' in plot_summary:
+                keywords.append('扫黑除恶')
+            if '涉黑' in plot_summary or '黑帮' in plot_summary:
+                keywords.append('涉黑组织')
+            if '教育整顿' in plot_summary:
+                keywords.append('教育整顿')
+            if keywords:
+                elements.append(f"关键词: {', '.join(keywords)}")
+        
+        return ' | '.join(elements) if elements else '(无)'
+    
     def should_add_hook(
         self,
         media_type: str,
@@ -216,14 +251,17 @@ class HookGenerator:
         style: str,
         duration_minutes: int
     ) -> Optional[str]:
-        """AI生成开场钩子"""
+        """v5.7改进：AI生成个性化开场钩子"""
         if not self.llm_model:
             return None
         
         try:
             import ollama
             
-            prompt = f"""为《{title}》生成一个吸引人的开场白（30-50字）：
+            # v5.7：提取剧情关键元素
+            key_elements = self._extract_key_elements(plot_summary, main_character)
+            
+            prompt = f"""为《{title}》生成一个与剧情强关联的开场白（30-50字）：
 
 【剧情概要】
 {plot_summary[:300] if plot_summary else '(无剧情概要)'}
@@ -231,27 +269,25 @@ class HookGenerator:
 【主角】
 {main_character if main_character else '(未知)'}
 
+【关键元素】
+{key_elements}
+
 【视频时长】
 {duration_minutes}分钟
 
-【风格】
-{style}
+【要求 - v5.7个性化】
+1. 必须包含《{title}》的具体剧情元素（人名/地点/事件）
+2. 不要使用通用模板如"命运的齿轮"
+3. 要让观众一听就知道这是《{title}》的解说
+4. {style}风格
+5. 30-50字
 
-【可选策略】（选一种最适合的）
-1. 提问式："你能想象吗？一个xxx竟然..."
-2. 悬念式："当xxx发生时，所有人都没想到..."
-3. 反差式："从xxx到xxx，只用了..."
-4. 时长式："接下来的{duration_minutes}分钟，带你看完..."
-5. 命运式："命运的齿轮，从这一刻开始转动"
+【示例（仅参考格式，内容要针对{title}）】
+- "一个卖鱼的小贩，如何成为一手遮天的黑老大？"
+- "二十年前的一场意外，却让两个人的命运纠缠至今"
+- "扫黑除恶，为何让这座城市人人自危？"
 
-【要求】
-- 30-50字
-- 引发好奇心
-- 不剧透核心结局
-- {style}风格
-- 不要用"大家好"等问候语
-
-直接输出开场白（不要解释）："""
+直接输出开场白（必须与{title}剧情相关）："""
             
             response = ollama.chat(
                 model=self.llm_model,

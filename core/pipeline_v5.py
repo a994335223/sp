@@ -162,15 +162,15 @@ class VideoPipelineV5:
         
         # 打印启动信息
         print("\n" + "="*60)
-        print("[PIPELINE] SmartVideoClipper v5.2 - 深度优化版")
+        print("[PIPELINE] SmartVideoClipper v5.7 - 全球最优智能解说")
         print("="*60)
-        print("   v5.2 深度优化:")
-        print("   1. [OK] 修复模板文字问题（删除垃圾内容）")
-        print("   2. [OK] 重构解说生成（AI概括而非截断）")
-        print("   3. [OK] 广告检测（检测中间广告）")
-        print("   4. [OK] 去重解说（删除重复内容）")
-        print("   5. [OK] TTS平滑处理（淡入淡出）")
-        print("   6. [OK] 合并短场景（减少碎片）")
+        print("   v5.7 核心优化:")
+        print("   1. [OK] 垃圾文字清洗（过滤AI思考残留）")
+        print("   2. [OK] 100%AI生成（多级重试+兜底）")
+        print("   3. [OK] 风格自动适配（按视频类型）")
+        print("   4. [OK] 废除固定比例（智能判断）")
+        print("   5. [OK] 静音智能填充（场景感知）")
+        print("   6. [OK] 个性化钩子（剧情关联）")
         print("   7. [OK] GPU硬件加速编码")
         print("="*60)
         
@@ -319,20 +319,33 @@ class VideoPipelineV5:
             
             log(f"   [Step2]     场景分析完成")
             
-            # ========== Step 3: 智能解说 (v5.6分层生成) ==========
-            report_progress(3, f"生成{style}风格解说（v5.6分层模式）...", "分层生成 + 上下文感知")
-            log("   [Step3] 开始智能解说生成 v5.6...")
+            # ========== Step 3: 智能解说 (v5.7风格适配+分层生成) ==========
+            from narration_engine import NarrationEngine, detect_video_genre, get_optimal_style
             
-            from narration_engine import NarrationEngine
+            # v5.7新增：自动检测视频类型并适配风格
+            detected_genre = detect_video_genre(title, episode_plot or "")
+            optimal_style_config = get_optimal_style(detected_genre)
             
-            # v5.6: 初始化解说引擎（传入总集数用于悬念结尾判断）
-            log("   [Step3] 3.1 初始化解说引擎 v5.6...")
+            # v5.7：如果用户指定了风格，使用用户的；否则使用自动检测的
+            if style == "幽默":  # 默认值，可能未指定
+                actual_style = optimal_style_config['prompt_style']
+                style_name = optimal_style_config['name']
+            else:
+                actual_style = style
+                style_name = style
+            
+            log(f"   [Step3] v5.7风格适配: 检测类型={detected_genre}, 风格={style_name}")
+            report_progress(3, f"生成{style_name}风格解说（v5.7智能适配）...", "分层生成 + 上下文感知")
+            log("   [Step3] 开始智能解说生成 v5.7...")
+            
+            # v5.7: 初始化解说引擎（传入总集数用于悬念结尾判断）
+            log("   [Step3] 3.1 初始化解说引擎 v5.7...")
             total_episodes = 1  # 默认1集，可从外部传入
             engine = NarrationEngine(
                 use_ai=True, 
                 media_type=media_type, 
                 episode=episode,
-                total_episodes=total_episodes  # v5.6新增
+                total_episodes=total_episodes
             )
             
             log("   [Step3] 3.2 分层生成解说 (框架→场景→上下文)...")
@@ -497,7 +510,7 @@ class VideoPipelineV5:
             elapsed = (end_time - self.start_time).seconds
             
             print("\n" + "*"*60)
-            print("*  [SUCCESS] v5.4 处理完成!")
+            print("*  [SUCCESS] v5.7 处理完成!")
             print("*  ====================================================")
             print(f"*  结束时间: {end_time.strftime('%Y-%m-%d %H:%M:%S')}")
             print(f"*  总耗时: {elapsed//60}分{elapsed%60}秒")

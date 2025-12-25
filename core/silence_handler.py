@@ -97,6 +97,53 @@ class SilenceHandler:
         except Exception:
             self.llm_model = None
     
+    def _detect_silence_type(
+        self,
+        dialogue: str,
+        emotion: str,
+        prev_scene: Dict = None,
+        next_scene: Dict = None
+    ) -> Tuple[str, str]:
+        """
+        v5.7：检测静音类型并返回扩展策略
+        
+        静音类型：
+        - emotion_brewing: 情绪酝酿（强情感前后）
+        - environment_transition: 环境过渡
+        - before_climax: 高潮前夕
+        - action_scene: 动作场景
+        - flashback: 回忆/闪回
+        - confrontation: 对峙场景
+        - default: 默认
+        """
+        # 检测情绪酝酿
+        strong_emotions = ['angry', 'sad', 'crying', 'excited']
+        if emotion in strong_emotions:
+            return "情绪酝酿", "描述角色此刻的内心挣扎、情感波动，让观众感受人物的心理活动"
+        
+        # 检测是否在高潮前夕
+        if next_scene:
+            next_importance = next_scene.get('importance', 0)
+            next_emotion = next_scene.get('emotion', '')
+            if next_importance >= 0.8 or next_emotion in strong_emotions:
+                return "高潮前夕", "铺垫即将到来的转折，用'谁也没想到''命运的齿轮'等方式营造悬念"
+        
+        # 检测环境过渡
+        if not dialogue or len(dialogue) < 10:
+            if prev_scene and next_scene:
+                return "环境过渡", "描述场景变换、时间流逝，如'夜幕降临''几个小时后'等自然衔接"
+        
+        # 检测对峙场景
+        if dialogue and ('你' in dialogue or '我' in dialogue) and emotion in ['angry', 'neutral']:
+            return "对峙场景", "分析双方的态势和心理，描述紧张的气氛"
+        
+        # 检测动作场景（无对话但重要）
+        if not dialogue and prev_scene and prev_scene.get('importance', 0) > 0.6:
+            return "动作场景", "描述动作的意义和影响，解释画面中发生了什么"
+        
+        # 默认策略
+        return "剧情推进", "补充背景信息、人物关系或与整体故事的联系"
+    
     def detect_silence_gaps(self, scenes: List[Dict]) -> List[SilenceGap]:
         """
         检测静音段落
@@ -229,10 +276,12 @@ class SilenceHandler:
         dialogue: str,
         emotion: str,
         plot_summary: str,
-        style: str
+        style: str,
+        prev_scene: Dict = None,
+        next_scene: Dict = None
     ) -> Optional[str]:
         """
-        AI扩展解说
+        v5.7改进：AI扩展解说，根据静音类型选择策略
         
         参数：
             narration: 当前解说
@@ -241,6 +290,8 @@ class SilenceHandler:
             emotion: 情感
             plot_summary: 剧情概要
             style: 风格
+            prev_scene: 前一场景（用于上下文）
+            next_scene: 后一场景（用于上下文）
         
         返回：扩展后的解说
         """
@@ -252,7 +303,22 @@ class SilenceHandler:
             
             target_chars = len(narration) + need_chars
             
-            prompt = f"""请扩展以下解说，增加约{need_chars}字，总字数约{target_chars}字：
+            # v5.7：检测静音类型，选择扩展策略
+            silence_type, strategy = self._detect_silence_type(
+                dialogue, emotion, prev_scene, next_scene
+            )
+            
+            # 构建上下文
+            prev_context = ""
+            next_context = ""
+            if prev_scene:
+                prev_dialogue = prev_scene.get('dialogue', '')[:50]
+                prev_context = f"- 前一场景：{prev_dialogue if prev_dialogue else '(无对话)'}"
+            if next_scene:
+                next_dialogue = next_scene.get('dialogue', '')[:50]
+                next_context = f"- 后一场景：{next_dialogue if next_dialogue else '(无对话)'}"
+            
+            prompt = f"""请扩展以下解说，增加约{need_chars}字：
 
 【当前解说】
 {narration}
@@ -261,18 +327,21 @@ class SilenceHandler:
 - 对话：{dialogue[:100] if dialogue else '(无对话)'}
 - 情感：{emotion}
 - 剧情背景：{plot_summary[:100] if plot_summary else '(无)'}
+{prev_context}
+{next_context}
 
-【扩展方向】（选1-2个自然融入）
-1. 补充场景氛围描述
-2. 补充人物心理活动
-3. 补充背景信息
-4. 增强与前后场景的衔接
+【静音类型】{silence_type}
+
+【扩展策略】
+{strategy}
 
 【要求】
-- 自然融入原解说，不要生硬拼接
+- 自然融入原解说
 - 总字数约{target_chars}字
 - 保持{style}风格
 - 不要复述对话原文
+- 不要出现"XX字"等字数标记
+- 直接输出解说，不要任何格式标记
 
 直接输出扩展后的完整解说："""
             

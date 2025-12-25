@@ -58,6 +58,89 @@ SENSITIVE_WORDS = [
     "民进党", "法轮功", "六四", "天安门", "台独", "藏独", "疆独", "港独",
 ]
 
+# v5.7新增：风格自动适配系统
+STYLE_CONFIG = {
+    'crime': {  # 犯罪悬疑剧（如：狂飙、扫黑风暴）
+        'name': '冷峻沉稳',
+        'description': '低沉稳重，关键处加重语气',
+        'keywords': ['犯罪', '悬疑', '扫黑', '黑帮', '警察', '破案', '凶手', '涉黑'],
+        'forbidden': ['哈哈', '搞笑', '逗比', '太可爱了'],
+        'humor_ratio': 0.15,
+        'prompt_style': '用冷峻沉稳的语气，适度加入讽刺',
+    },
+    'comedy': {  # 喜剧
+        'name': '幽默吐槽',
+        'description': '轻快活泼，多用网络梗',
+        'keywords': ['喜剧', '搞笑', '轻松', '爆笑', '段子'],
+        'humor_ratio': 0.70,
+        'prompt_style': '用幽默吐槽的语气，多用网络梗和比喻',
+    },
+    'romance': {  # 爱情
+        'name': '温情叙事',
+        'description': '温柔细腻，让情感发酵',
+        'keywords': ['爱情', '浪漫', '感情', '甜蜜', '暗恋', '表白'],
+        'humor_ratio': 0.10,
+        'prompt_style': '用温情细腻的语气，注重情感描写',
+    },
+    'action': {  # 动作
+        'name': '激情快节奏',
+        'description': '紧张刺激，节奏感强',
+        'keywords': ['动作', '打斗', '追逐', '枪战', '爆炸', '格斗'],
+        'humor_ratio': 0.20,
+        'prompt_style': '用紧张刺激的语气，强调动作冲击感',
+    },
+    'history': {  # 历史剧
+        'name': '稳重大气',
+        'description': '厚重感强，传递文化底蕴',
+        'keywords': ['历史', '古装', '王朝', '皇帝', '朝廷', '战争'],
+        'humor_ratio': 0.05,
+        'prompt_style': '用稳重大气的语气，传递历史厚重感',
+    },
+    'horror': {  # 恐怖
+        'name': '低沉神秘',
+        'description': '营造恐惧氛围',
+        'keywords': ['恐怖', '惊悚', '鬼', '死亡', '诡异'],
+        'humor_ratio': 0.0,
+        'prompt_style': '用低沉神秘的语气，营造悬疑恐怖感',
+    },
+    'default': {  # 默认
+        'name': '专业解读',
+        'description': '清晰专业，信息准确',
+        'keywords': [],
+        'humor_ratio': 0.30,
+        'prompt_style': '用专业清晰的语气解读剧情',
+    }
+}
+
+
+def detect_video_genre(title: str, plot: str) -> str:
+    """
+    v5.7：自动检测视频类型
+    返回类型：crime, comedy, romance, action, history, horror, default
+    """
+    text = f"{title} {plot}".lower()
+    
+    # 计算每个类型的匹配分数
+    scores = {}
+    for genre, config in STYLE_CONFIG.items():
+        if genre == 'default':
+            continue
+        score = sum(1 for kw in config.get('keywords', []) if kw in text)
+        if score > 0:
+            scores[genre] = score
+    
+    if not scores:
+        return 'default'
+    
+    # 返回得分最高的类型
+    return max(scores, key=scores.get)
+
+
+def get_optimal_style(genre: str) -> dict:
+    """获取最优解说风格配置"""
+    return STYLE_CONFIG.get(genre, STYLE_CONFIG['default'])
+
+
 # 低质量内容检测 - 这些绝对不能作为解说出现！
 BAD_PATTERNS = [
     "紧张的场面", "紧张的一幕", "此刻紧张", "画面一转，紧张",
@@ -68,6 +151,97 @@ BAD_PATTERNS = [
     "重要场景", "关键场景", "这一幕",
     "解说文本", "解说词", "旁白",
 ]
+
+# v5.7新增：AI输出垃圾内容清洗
+def clean_narration_text(text: str) -> str:
+    """
+    清洗解说文本中的垃圾内容 v5.7
+    
+    清洗内容：
+    1. 字数标记：15字、28字、30字等
+    2. AI思考过程残留
+    3. JSON格式残留
+    4. 后期术语：不打码、马赛克等
+    5. 多余标点
+    """
+    if not text:
+        return ""
+    
+    # 1. 删除字数标记（各种格式）
+    text = re.sub(r'\d+字[：:]\s*', '', text)
+    text = re.sub(r'"\d+字"\s*[：:]\s*', '', text)
+    text = re.sub(r'【\d+字】\s*', '', text)
+    text = re.sub(r'\(\d+字\)\s*', '', text)
+    
+    # 2. 删除AI思考过程残留
+    garbage_phrases = [
+        r'检查是否自然融入[^。，]*[。，]?',
+        r'可能需要多次调整[^。，]*[。，]?',
+        r'需要检查是否[^。，]*[。，]?',
+        r'接下来，我要确定[^。，]*[。，]?',
+        r'确保自然融入[^。，]*[。，]?',
+        r'主要信息包括[^。，]*[。，]?',
+        r'符合要求[^。，]*[。，]?',
+        r'所以最终的扩展[^。，]*[。，]?',
+        r'同时保持幽默和字数限制[^。，]*[。，]?',
+        r'没有复述对话原文[^。，]*[。，]?',
+        r'这样可以[^。，]*[。，]?',
+        r'下面是[^。，]*[。，]?',
+        r'以下是[^。，]*[。，]?',
+    ]
+    for pattern in garbage_phrases:
+        text = re.sub(pattern, '', text)
+    
+    # 3. 删除JSON格式残留
+    text = re.sub(r'"\d+字"\s*:\s*"', '', text)
+    text = re.sub(r'",\s*$', '', text)
+    text = re.sub(r'^"', '', text)
+    text = re.sub(r'"$', '', text)
+    
+    # 4. 删除后期术语
+    text = re.sub(r'不打马赛克[！!]?', '', text)
+    text = re.sub(r'不打马[！!]?', '', text)
+    text = re.sub(r'真相不打码[！!]?', '', text)
+    text = re.sub(r'真相不绕弯[！!]?', '', text)
+    
+    # 5. 清理多余标点
+    text = re.sub(r'[，,]{2,}', '，', text)
+    text = re.sub(r'[。.]{2,}', '。', text)
+    text = re.sub(r'[！!]{2,}', '！', text)
+    text = re.sub(r'^[，,。.！!]+', '', text)
+    text = re.sub(r'[，,]+$', '', text)
+    
+    # 6. 去除首尾空白和多余空格
+    text = text.strip()
+    text = re.sub(r'\s+', ' ', text)
+    
+    return text
+
+
+def validate_narration(text: str) -> bool:
+    """
+    验证解说是否合格 v5.7
+    返回True表示合格，False表示需要重新生成
+    """
+    if not text or len(text) < 5:
+        return False
+    
+    # 检测垃圾内容
+    invalid_patterns = [
+        r'\d+字[：:]',
+        r'检查是否',
+        r'需要确认',
+        r'可能需要',
+        r'不打码',
+        r'马赛克',
+        r'主要信息包括',
+        r'接下来，我要',
+    ]
+    for pattern in invalid_patterns:
+        if re.search(pattern, text):
+            return False
+    
+    return True
 
 
 class AudioMode(Enum):
@@ -600,7 +774,7 @@ class NarrationEngine:
             else:
                 narrations = []
             
-            # 分配结果
+            # v5.7改进：分配结果，增加重试和兜底机制
             for i, scene in enumerate(batch_scenes):
                 if i < len(narrations) and narrations[i]:
                     narration = narrations[i]
@@ -609,15 +783,31 @@ class NarrationEngine:
                         generated += 1
                         continue
                 
-                # 备用：AI总结对话
+                # v5.7：第一次备用 - AI总结对话
                 fallback = self._ai_summarize_dialogue(scene.dialogue)
-                if fallback and len(fallback) >= 5:
+                if fallback and len(fallback) >= 5 and not self._is_low_quality(fallback):
                     scene.narration = fallback
                     fallback_used += 1
-                else:
-                    scene.audio_mode = AudioMode.ORIGINAL
-                    scene.reason = "AI生成失败,改用原声"
-                    failed += 1
+                    continue
+                
+                # v5.7：第二次备用 - 超简化AI生成（重试机制）
+                simple_result = self._simple_ai_generate(scene.dialogue, style)
+                if simple_result and len(simple_result) >= 5:
+                    scene.narration = simple_result
+                    fallback_used += 1
+                    continue
+                
+                # v5.7：第三次备用 - 基于对话关键词生成
+                keyword_result = self._keyword_based_generate(scene.dialogue, style)
+                if keyword_result and len(keyword_result) >= 5:
+                    scene.narration = keyword_result
+                    fallback_used += 1
+                    continue
+                
+                # 所有方案都失败，才使用原声
+                scene.audio_mode = AudioMode.ORIGINAL
+                scene.reason = "多次AI尝试均失败,改用原声"
+                failed += 1
         
         total_time = time.time() - start_time
         success_rate = (generated + fallback_used) / voiceover_count * 100 if voiceover_count > 0 else 0
@@ -938,13 +1128,17 @@ class NarrationEngine:
                 try:
                     results = json.loads(match.group())
                     if isinstance(results, list):
-                        # 清理每个结果
+                        # 清理每个结果 v5.7增强：使用clean_narration_text
                         cleaned = []
                         for r in results:
                             if isinstance(r, str):
                                 r = r.strip().strip('"\'')
                                 r = re.sub(r'^[\d]+[\.、]\s*', '', r)
-                                cleaned.append(r)
+                                r = clean_narration_text(r)  # v5.7: 清洗垃圾内容
+                                if r and validate_narration(r):  # v5.7: 验证
+                                    cleaned.append(r)
+                                else:
+                                    cleaned.append("")  # 不合格则返回空
                             else:
                                 cleaned.append("")
                         return cleaned
@@ -960,7 +1154,9 @@ class NarrationEngine:
                 line = re.sub(r'^[\d]+[\.、\)）]\s*', '', line)
                 line = line.strip('"\'[]')
                 if line and len(line) > 5 and len(line) < 60:
-                    results.append(line)
+                    line = clean_narration_text(line)  # v5.7: 清洗垃圾内容
+                    if validate_narration(line):  # v5.7: 验证
+                        results.append(line)
             
             return results[:len(scenes)]
             
@@ -1009,7 +1205,10 @@ class NarrationEngine:
             
             if result:
                 result = result.strip('"\'')
+                result = clean_narration_text(result)  # v5.7: 清洗垃圾内容
                 result = self._filter_sensitive(result)
+                if not validate_narration(result):  # v5.7: 验证
+                    return ""
             
             return result
             
@@ -1201,9 +1400,101 @@ class NarrationEngine:
             result = result.strip('"\'""''')
             result = re.sub(r'^[\d]+[\.、]\s*', '', result)
             
-            return self._filter_sensitive(result)
+            # v5.7: 清洗垃圾内容并验证
+            result = clean_narration_text(result)
+            result = self._filter_sensitive(result)
+            
+            if not validate_narration(result):
+                return ""
+            
+            return result
             
         except Exception as e:
+            return ""
+    
+    def _simple_ai_generate(self, dialogue: str, style: str) -> str:
+        """
+        v5.7：超简化AI生成（作为第二次兜底）
+        使用最简单的prompt确保生成成功
+        """
+        if not self.llm_model or not dialogue:
+            return ""
+        
+        try:
+            import ollama
+            
+            # 超简化prompt
+            prompt = f"用10字描述：{dialogue[:50]}"
+            
+            response = ollama.chat(
+                model=self.llm_model,
+                messages=[{'role': 'user', 'content': prompt}],
+                options={
+                    'num_predict': 100,
+                    'temperature': 0.3,
+                }
+            )
+            
+            msg = response.get('message', {})
+            result = ""
+            
+            if hasattr(msg, 'content') and msg.content:
+                result = msg.content.strip()
+            elif hasattr(msg, 'thinking') and msg.thinking:
+                lines = msg.thinking.strip().split('\n')
+                for line in reversed(lines):
+                    line = line.strip()
+                    if 5 < len(line) < 30:
+                        result = line
+                        break
+            
+            if result:
+                result = clean_narration_text(result)
+                result = self._filter_sensitive(result)
+            
+            return result if validate_narration(result) else ""
+            
+        except Exception:
+            return ""
+    
+    def _keyword_based_generate(self, dialogue: str, style: str) -> str:
+        """
+        v5.7：基于关键词生成（作为最后兜底）
+        提取对话中的关键动作/名词生成简单解说
+        """
+        if not dialogue:
+            return ""
+        
+        try:
+            import ollama
+            
+            # 最简单的prompt
+            prompt = f"从'{dialogue[:30]}'提取动作，用5字描述"
+            
+            response = ollama.chat(
+                model=self.llm_model,
+                messages=[{'role': 'user', 'content': prompt}],
+                options={
+                    'num_predict': 50,
+                    'temperature': 0.2,
+                }
+            )
+            
+            msg = response.get('message', {})
+            result = ""
+            
+            if hasattr(msg, 'content') and msg.content:
+                result = msg.content.strip()
+            elif hasattr(msg, 'thinking') and msg.thinking:
+                result = msg.thinking.strip().split('\n')[-1]
+            
+            if result:
+                result = clean_narration_text(result)
+                result = self._filter_sensitive(result)
+            
+            return result if len(result) >= 5 else ""
+            
+        except Exception:
             return ""
     
     def _optimize_continuity(self, scenes: List[SceneSegment]) -> List[SceneSegment]:

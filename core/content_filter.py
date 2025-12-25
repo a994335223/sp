@@ -37,6 +37,58 @@ LOW_QUALITY_PATTERNS = [
     r"unknown",
 ]
 
+# v5.7新增：广告对白识别模式
+AD_PATTERNS = [
+    # 药品广告
+    r"用痛[﹔;,，]?用经敌",
+    r"家中常备",
+    r"经敌邀您观看",
+    r"邀您观看",
+    r"巨颗话谈",
+    r"苦红利焉",
+    r"精通电子案",
+    r"穿被皮发膏",
+    r"教您观看",
+    # 其他广告
+    r"赞助播出",
+    r"独家冠名",
+    r"为您呈现",
+    r"温馨提示",
+    r"下期预告",
+    # 乱码识别（Whisper乱码特征）
+    r"[﹔;]{2,}",  # 连续分号
+    r"[\u4e00-\u9fa5]{1,2}[﹔;][\u4e00-\u9fa5]{1,2}[﹔;]",  # 字﹔字﹔模式
+]
+
+
+def is_ad_content(text: str) -> bool:
+    """
+    v5.7：检查是否是广告内容
+    """
+    if not text:
+        return False
+    
+    for pattern in AD_PATTERNS:
+        if re.search(pattern, text):
+            return True
+    
+    # 检测乱码特征：短词+分号组合过多
+    if text.count('﹔') > 3 or text.count(';') > 5:
+        return True
+    
+    return False
+
+
+def filter_ad_content(text: str) -> Tuple[str, bool]:
+    """
+    v5.7：过滤广告内容
+    
+    返回：(过滤后的文本, 是否是广告)
+    """
+    if is_ad_content(text):
+        return "", True
+    return text, False
+
 
 def filter_sensitive_content(text: str) -> Tuple[str, List[str]]:
     """
