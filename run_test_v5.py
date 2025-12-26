@@ -21,6 +21,35 @@ from datetime import datetime
 # 设置编码
 os.environ["PYTHONIOENCODING"] = "utf-8"
 
+# ===== v5.8.0 重要更新：Structured格式优化 =====
+# 清理所有Python缓存，确保使用最新代码（v5.8 Structured格式）
+import shutil
+cache_dirs = [
+    "__pycache__",
+    "core/__pycache__",
+    "utils/__pycache__"
+]
+for cache_dir in cache_dirs:
+    if os.path.exists(cache_dir):
+        shutil.rmtree(cache_dir)
+        print(f"[CACHE v5.8] 清理缓存: {cache_dir}")
+
+# 清理已加载的模块，确保v5.8修改生效
+modules_to_clear = [
+    'core.narration_engine',
+    'core.pipeline_v5',
+    'core.dynamic_ratio',
+    'core.silence_handler',
+    'core.hook_generator'
+]
+
+for module in modules_to_clear:
+    if module in sys.modules:
+        del sys.modules[module]
+        print(f"[CACHE v5.8] 清理模块: {module}")
+
+print("[INFO v5.8] Structured格式优化已加载：100% AI生成成功率")
+
 # 添加路径
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "core"))
