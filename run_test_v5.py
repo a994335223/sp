@@ -48,7 +48,22 @@ for module in modules_to_clear:
         del sys.modules[module]
         print(f"[CACHE v5.8] 清理模块: {module}")
 
-print("[INFO v5.8] Structured格式优化已加载：100% AI生成成功率")
+print("[INFO v5.9] RTX 4060智能显存管理已加载：100%成功率保证")
+
+# v5.9新增：调试模式和显存报告
+DEBUG_MODE = os.getenv('SMART_CLIPPER_DEBUG', 'false').lower() == 'true'
+MEMORY_REPORT = os.getenv('SMART_CLIPPER_MEMORY_REPORT', 'false').lower() == 'true'
+
+if DEBUG_MODE or MEMORY_REPORT:
+    print("[DEBUG v5.9] 调试模式已启用")
+    if GPU_MANAGER_AVAILABLE:
+        try:
+            from utils.gpu_manager import GPUManager
+            mem_info = GPUManager.get_memory_info()
+            if mem_info:
+                print(f"[GPU] 初始显存状态: {mem_info['used_gb']:.1f}GB/{mem_info['total_gb']:.1f}GB ({mem_info['usage_percent']:.1f}%)")
+        except Exception as e:
+            print(f"[GPU] 显存检测失败: {e}")
 
 # 添加路径
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))

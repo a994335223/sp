@@ -38,6 +38,13 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
+# 导入GPU管理器 (v5.9新增)
+try:
+    from utils.gpu_manager import GPUManager
+    GPU_MANAGER_AVAILABLE = True
+except ImportError:
+    GPU_MANAGER_AVAILABLE = False
+
 # 尝试加载配置
 try:
     from config import TV_VOICEOVER_RATIO, MOVIE_VOICEOVER_RATIO, MIN_ORIGINAL_RATIO
@@ -45,6 +52,62 @@ except ImportError:
     TV_VOICEOVER_RATIO = 0.60
     MOVIE_VOICEOVER_RATIO = 0.40
     MIN_ORIGINAL_RATIO = 0.25
+
+# v5.9新增：带异常处理的Ollama调用辅助函数
+def safe_ollama_chat(model: str, messages: list, options: dict = None, context: str = "") -> dict:
+    """
+    安全的Ollama调用，带GPU异常处理和自动降级
+
+    Args:
+        model: 模型名称
+        messages: 消息列表
+        options: 调用选项
+        context: 调用上下文描述（用于日志）
+
+    Returns:
+        Ollama响应字典，失败时返回空字典
+    """
+    import ollama
+
+    if options is None:
+        options = {'num_predict': 1000, 'temperature': 0.5}
+
+    try:
+        response = ollama.chat(
+            model=model,
+            messages=messages,
+            options=options
+        )
+        return response
+    except Exception as e:
+        error_msg = str(e).lower()
+        context_info = f" ({context})" if context else ""
+
+        if 'cuda' in error_msg or 'out of memory' in error_msg or 'gpu' in error_msg:
+            print(f"[GPU v5.9] 🚨 显存不足错误{context_info}: {e}")
+
+            # 尝试降级到CPU模式
+            if GPU_MANAGER_AVAILABLE:
+                print(f"[GPU v5.9] 尝试CPU降级{context_info}...")
+                try:
+                    cpu_options = options.copy()
+                    cpu_options['num_gpu'] = 0  # 强制CPU模式
+
+                    response = ollama.chat(
+                        model=model,
+                        messages=messages,
+                        options=cpu_options
+                    )
+                    print(f"[GPU v5.9] ✅ CPU降级成功{context_info}")
+                    return response
+                except Exception as cpu_error:
+                    print(f"[GPU v5.9] ❌ CPU降级失败{context_info}: {cpu_error}")
+            else:
+                print(f"[GPU v5.9] GPU管理器不可用{context_info}")
+        else:
+            print(f"[AI] 调用异常{context_info}: {e}")
+
+    return {}
 
 # v5.6新增：导入新模块
 try:
@@ -462,18 +525,29 @@ class NarrationEngine:
         self._init_v56_modules()
     
     def _init_llm(self):
-        """初始化LLM模型"""
+        """初始化LLM模型 (v5.9优化：使用GPUManager智能选择)"""
         try:
             import ollama
             models = ollama.list()
-            
+
             # 保存完整模型名（包括:tag）
             available = []
             for model in models.get('models', []):
                 name = model.get('name', '') or model.get('model', '')
                 if name:
-                    available.append(name)  # 保留完整名称如 qwen3:8b
-            
+                    available.append(name)
+
+            # v5.9新增：使用GPUManager进行智能模型选择
+            if GPU_MANAGER_AVAILABLE:
+                # RTX 4060专用：核心解说使用qwen3:8b
+                optimal_model = GPUManager.get_model_for_task('narration')
+                if optimal_model in available:
+                    self.llm_model = optimal_model
+                    print(f"[LLM v5.9] RTX 4060优化: {self.llm_model}")
+                    return
+                else:
+                    print(f"[LLM v5.9] 推荐模型{optimal_model}不可用，使用兼容模式")
+
             # v5.7.3: qwen3工作正常，content字段有正确输出
             # thinking和content是分离的，只需正确提取content即可
             priority = ['qwen3', 'qwen2.5', 'qwen', 'llama3', 'gemma', 'mistral']
@@ -483,7 +557,7 @@ class NarrationEngine:
                         self.llm_model = a  # 使用完整名称
                         print(f"[LLM] 使用模型: {self.llm_model}")
                         return
-            
+
             if available:
                 self.llm_model = available[0]
                 print(f"[LLM] 使用模型: {self.llm_model}")
@@ -503,17 +577,30 @@ class NarrationEngine:
             return
         
         try:
-            # 故事框架生成器
-            self.framework_generator = StoryFrameworkGenerator(self.llm_model)
-            
-            # 动态比例计算器
+            # v5.9优化：各模块使用分级模型策略
+            if GPU_MANAGER_AVAILABLE:
+                # 故事框架：使用小模型节省显存
+                framework_model = GPUManager.get_model_for_task('story_framework')
+                self.framework_generator = StoryFrameworkGenerator(framework_model)
+                print(f"[Engine v5.9] 故事框架使用: {framework_model}")
+
+                # 静音处理器：使用中等模型
+                silence_model = GPUManager.get_model_for_task('silence_handler')
+                self.silence_handler = SilenceHandler(silence_model)
+                print(f"[Engine v5.9] 静音处理使用: {silence_model}")
+
+                # 钩子生成器：使用小模型
+                hook_model = GPUManager.get_model_for_task('hook_generator')
+                self.hook_generator = HookGenerator(hook_model)
+                print(f"[Engine v5.9] 钩子生成使用: {hook_model}")
+            else:
+                # 兼容模式：所有模块使用相同模型
+                self.framework_generator = StoryFrameworkGenerator(self.llm_model)
+                self.silence_handler = SilenceHandler(self.llm_model)
+                self.hook_generator = HookGenerator(self.llm_model)
+
+            # 动态比例计算器（不需要LLM）
             self.ratio_calculator = DynamicRatioCalculator(self.media_type)
-            
-            # 静音处理器
-            self.silence_handler = SilenceHandler(self.llm_model)
-            
-            # 钩子生成器
-            self.hook_generator = HookGenerator(self.llm_model)
             
             print("[Engine] v5.6模块初始化成功")
         except Exception as e:
@@ -845,9 +932,18 @@ class NarrationEngine:
                     scene.reason = "AI生成失败,改用原声"
                     failed += 1
 
-            # v5.8.0 新增：批次间延迟，避免累积效应
+            # v5.9增强：智能批次间延迟 + 显存监控
             if batch_idx < batch_count - 1:  # 不是最后一个批次
-                time.sleep(1)  # 1秒延迟
+                # 显存监控和清理
+                if GPU_MANAGER_AVAILABLE:
+                    print(f"[GPU v5.9] 批次{batch_idx+1}完成，检查显存...")
+                    if not GPUManager.monitor_and_cleanup(0.85):  # 85%阈值
+                        print("[GPU v5.9] ⚠️ 显存清理失败，增加延迟...")
+                        time.sleep(3)  # 延长延迟
+                    else:
+                        time.sleep(1)  # 正常延迟
+                else:
+                    time.sleep(1)  # 兼容模式延迟
         
         total_time = time.time() - start_time
         success_rate = (generated + fallback_used) / voiceover_count * 100 if voiceover_count > 0 else 0
@@ -895,7 +991,7 @@ class NarrationEngine:
         batch_size = 10
         batch_count = (voiceover_count + batch_size - 1) // batch_size
         
-        log(f"[Narration] ========== v5.8 Structured格式优化 ==========")
+        log(f"[Narration] ========== v5.9 RTX4060智能显存管理 ==========")
         log(f"[Narration] 场景总数: {voiceover_count}")
         log(f"[Narration] 批次数量: {batch_count}")
         log(f"[Narration] 故事框架: {len(self.story_framework)}段")
@@ -961,6 +1057,18 @@ class NarrationEngine:
                 scene.audio_mode = AudioMode.ORIGINAL
                 scene.reason = "多次AI尝试均失败,改用原声"
                 failed += 1
+
+            # v5.9新增：批次间智能延迟 + 显存监控
+            if batch_idx < batch_count - 1:  # 不是最后一个批次
+                if GPU_MANAGER_AVAILABLE:
+                    print(f"[GPU v5.9] 批次{batch_idx+1}完成，检查显存...")
+                    if not GPUManager.monitor_and_cleanup(0.85):  # 85%阈值
+                        print("[GPU v5.9] ⚠️ 显存清理失败，增加延迟...")
+                        time.sleep(2)  # 延长延迟
+                    else:
+                        time.sleep(1)  # 正常延迟
+                else:
+                    time.sleep(1)  # 兼容模式延迟
         
         total_time = time.time() - start_time
         success_rate = (generated + fallback_used) / voiceover_count * 100 if voiceover_count > 0 else 0
@@ -1275,15 +1383,29 @@ class NarrationEngine:
 
 直接输出："""
 
-            # 🚀 最优参数配置
-            response = ollama.chat(
+            # 🚀 v5.9新增：AI调用前显存监控
+            if GPU_MANAGER_AVAILABLE:
+                print(f"[GPU v5.9] 批量解说前显存检查...")
+                if not GPUManager.monitor_and_cleanup(0.80):  # 80%阈值
+                    print("[GPU v5.9] ⚠️ 显存清理失败，可能影响生成质量")
+                else:
+                    mem_info = GPUManager.get_memory_info()
+                    print(".1%")
+
+            # 🚀 v5.9优化：使用安全的AI调用
+            response = safe_ollama_chat(
                 model=self.llm_model,
                 messages=[{'role': 'user', 'content': prompt}],
                 options={
                     'num_predict': 2000,  # 充足的生成空间
                     'temperature': 0.5,   # 降低随机性，提高成功率
-                }
+                },
+                context="批量解说生成"
             )
+
+            if not response:
+                print("[Narration] 批量生成失败")
+                return []
 
             # 只从content提取，忽略thinking（关键修复）
             msg = response.get('message', {})
@@ -1480,10 +1602,11 @@ class NarrationEngine:
 
 剧情总结："""
             
-            response = ollama.chat(
+            response = safe_ollama_chat(
                 model=self.llm_model,
                 messages=[{'role': 'user', 'content': prompt}],
-                options={'num_predict': 500, 'temperature': 0.3}
+                options={'num_predict': 500, 'temperature': 0.3},
+                context="剧情总结"
             )
             
             # 获取内容（v5.5修复：正确访问Message对象属性）
